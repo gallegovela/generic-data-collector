@@ -2,8 +2,8 @@
 
 - **Prefijo:** `<MOD>`
 - **Estado:** borrador | requisitos listos | diseñado | en desarrollo | hecho
-- **Dueño de los requisitos:** architect
-- **Issues:** #<epic>
+- **Responsable:** analyst-programmer (escribe), architect (revisa)
+- **Issues:** #<issue de analysis>, #<issue de design>
 
 ## Objetivo
 

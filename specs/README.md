@@ -2,8 +2,8 @@
 
 Fuente de verdad de los módulos del proyecto. Cada subdirectorio es un módulo con, al menos, un `README.md` de requisitos. Las convenciones completas están en [`CLAUDE.md`](../CLAUDE.md#especificaciones-specs) y en la skill [`spec-writing`](../.claude/skills/spec-writing/SKILL.md).
 
-- `README.md` de cada módulo: requisitos (lo mantiene el agente **architect**).
-- `design.md` de cada módulo: diseño técnico (lo mantiene el agente **analyst-programmer**).
+- `README.md` de cada módulo: requisitos. Los escribe el agente **analyst-programmer** en la etapa `design`, bajo la revisión del **architect**.
+- `design.md` de cada módulo: diseño técnico, también del **analyst-programmer**.
 - Para crear un módulo: copiar [`_template/`](_template/) y añadirlo a esta tabla.
 
 ## Mapa de módulos

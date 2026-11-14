@@ -5,7 +5,7 @@ Guía del proyecto para Claude Code. Léela antes de cualquier tarea.
 Reglas de oro:
 
 - **La especificación manda.** Cada módulo del software se define en `specs/<modulo>/` antes de escribir código. Si el código y la especificación no coinciden, se para y se corrige primero la especificación (o se pregunta).
-- **Tres niveles de agente.** El trabajo pasa por el arquitecto, el analista programador y el programador, en ese orden, coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
+- **Tres etapas, tres agentes.** El trabajo pasa por `analysis` (arquitecto), `design` (analista programador, revisado por el arquitecto) y `develop` (programador), coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
 
 ## Qué es el proyecto
 
@@ -72,8 +72,8 @@ Estructura:
 specs/
 ├── README.md                 # índice de módulos, estado y convenciones
 ├── _template/                # plantillas para crear un módulo nuevo
-│   ├── README.md             # plantilla de requisitos (arquitecto)
-│   └── design.md             # plantilla de diseño técnico (analista)
+│   ├── README.md             # plantilla de requisitos
+│   └── design.md             # plantilla de diseño técnico
 └── <modulo>/                 # un subdirectorio por módulo, nombre en inglés kebab-case
     ├── README.md             # OBLIGATORIO: objetivo, alcance, requisitos, criterios de aceptación
     ├── design.md             # diseño técnico: capas, ficheros, contratos, tests (analista)
@@ -85,7 +85,7 @@ Reglas:
 - Cada subdirectorio de `specs/` es un módulo y tiene **al menos un `README.md`** con sus requisitos principales.
 - Los requisitos se numeran con un prefijo por módulo y no se renumeran nunca: `RF-<MOD>-01` (funcional), `RNF-<MOD>-01` (no funcional), `CA-<MOD>-01` (criterio de aceptación). Si un requisito se elimina, se marca como `~~retirado~~`, no se borra su número.
 - Los issues, commits y tests citan los identificadores de requisito que cubren (`Cubre: RF-FSC-03`).
-- El `README.md` lo escribe y mantiene el **arquitecto**; el `design.md` lo escribe el **analista programador**; el **programador** no cambia los requisitos: si encuentra una contradicción, la anota en el issue y se detiene en ese punto.
+- Quien escribe en `specs/` es el **analista programador** (tanto el `README.md` de requisitos como el `design.md`), siempre en la rama `issue-<n>` y bajo la revisión del **arquitecto**, que propone y argumenta los cambios en el issue pero no edita ficheros. El **programador** no cambia las especificaciones: si encuentra una contradicción, la anota en el issue y se detiene en ese punto.
 - Un módulo nuevo se crea copiando `specs/_template/` y se registra en el índice `specs/README.md`.
 - Textos de las especificaciones en español; nombres de módulo, rutas, tipos y código en inglés.
 
@@ -93,43 +93,61 @@ Reglas:
 
 El proyecto se desarrolla con tres agentes de Claude Code, definidos en `.claude/agents/`, y con skills propias en `.claude/skills/`. Cada agente tiene un nivel de responsabilidad y no invade el de los demás.
 
-| Nivel | Agente | Qué recibe | Qué entrega | Skills |
+El trabajo avanza por issues de GitHub en tres etapas. Cada etapa se activa poniendo su etiqueta en el issue y la ejecuta un agente:
+
+| Etapa (etiqueta) | Agente | Qué recibe | Qué entrega | Skills |
 | --- | --- | --- | --- | --- |
-| 1 | `architect` (arquitecto) | Conversaciones con el responsable del producto e issues de tipo `epic` | Requisitos en `specs/<modulo>/README.md`, decisiones de arquitectura e issues hijos con etiqueta `analysis` | `requirements-analysis`, `software-architecture`, `spec-writing`, `github-issues` |
-| 2 | `analyst-programmer` (analista programador) | Un issue `analysis` con contexto, diseño y objetivo | `specs/<modulo>/design.md` con capas, ficheros y contratos, e issues `development` listos para programar | `technical-design`, `spec-writing`, `github-issues` |
-| 3 | `developer` (programador) | Un issue `development` totalmente analizado | Código, tests y commits en la rama `issue-<n>`, y un comentario de cierre en el issue | `nextjs-development`, `github-issues` |
+| `analysis` | `architect` (arquitecto) | Una necesidad del producto, en un issue o en conversación | Comentario con la arquitectura argumentada, errores y mejoras detectados y recomendaciones; un issue hijo por cada pieza de desarrollo | `requirements-analysis`, `software-architecture`, `spec-writing`, `github-issues` |
+| `design` | `analyst-programmer` (analista programador), revisado por el `architect` | Un issue hijo creado por el arquitecto | Rama `issue-<n>` con `specs/` actualizado, y como **último comentario** del issue el plan de acción para el desarrollador | `technical-design`, `spec-writing`, `github-issues` |
+| `develop` | `developer` (programador) | El issue con su plan de acción y la rama `issue-<n>` | Código y tests en la rama `issue-<n>` y una pull request que cierra el issue | `nextjs-development`, `github-issues` |
 
 ### Recorrido de una funcionalidad
 
 ```text
-Conversación / issue epic ──► architect ──► specs/<modulo>/README.md
-                                   │
-                                   └──► issues "analysis" (uno por pieza funcional)
-                                              │
-                                     analyst-programmer ──► specs/<modulo>/design.md
-                                              │
-                                              └──► issues "development" (uno por tarea de código)
-                                                         │
-                                                     developer ──► rama issue-<n>, código + tests
+issue (etiqueta analysis) ──► architect: arquitectura, errores, mejoras ──► issues hijos (uno por pieza)
+                                                                                 │  una persona pone "design"
+                                                                                 ▼
+issue hijo (etiqueta design) ──► analyst-programmer: rama issue-<n> + specs/ + borrador del plan
+                                     ▲          │
+                                     │          ▼
+                                     └── architect: revisión con veredicto (APROBADO / CAMBIOS / PREGUNTA)
+                                                │
+                                                ▼
+                                 analyst-programmer: plan de acción final (último comentario)
+                                                │  una persona pone "develop"
+                                                ▼
+issue hijo (etiqueta develop) ──► developer: código + tests en issue-<n> ──► pull request
 ```
 
-1. **Arquitecto.** Dialoga con el usuario (directamente con `claude --agent architect`, o leyendo el hilo de un issue de GitHub con `gh issue view <n> --comments`). Entiende el contexto, hace las preguntas necesarias, analiza el proyecto en conjunto, escribe o actualiza los requisitos en `specs/` y crea un issue `analysis` por cada subtarea, enlazado al issue padre.
-2. **Analista programador.** Toma un issue `analysis`, lee la especificación y el código existente, y define las piezas de software: rutas y controladores (route handlers o server actions), servicios, repositorios de acceso a datos (el "DAO", con Prisma), esquemas Zod, componentes, migraciones y tests. Lo documenta en `design.md` y crea un issue `development` por tarea, cada uno con la lista exacta de ficheros, firmas y criterios de aceptación.
-3. **Programador.** Toma un issue `development`, implementa exactamente lo diseñado en la rama `issue-<n>`, escribe los tests, deja el código compilando con el linter y los tests en verde, y comenta en el issue lo que ha hecho. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
+1. **Análisis (`analysis`, arquitecto).** Lee el issue y todo su hilo, analiza el proyecto en conjunto y propone la arquitectura argumentando cada decisión. Señala errores, contradicciones, riesgos y posibles mejoras, tanto en la petición como en `specs/`, y da recomendaciones sobre cómo actuar. Crea un issue hijo por cada pieza de desarrollo (normalmente uno por módulo afectado), con el contexto, el objetivo y la arquitectura de esa pieza. No edita ficheros del repositorio. También se puede hablar con él directamente con `claude --agent architect`.
+2. **Diseño (`design`, analista programador bajo control del arquitecto).** Se hace en tres pasos dentro de la misma ejecución:
+   1. El analista crea o reutiliza la rama `issue-<n>`, actualiza `specs/` (requisitos y `design.md`), hace commit y publica en el issue un borrador del plan con sus dudas para el arquitecto.
+   2. El arquitecto revisa el borrador y el diff de `specs/`, argumenta sus observaciones y emite un veredicto: `APROBADO`, `CAMBIOS` o `PREGUNTA`.
+   3. Si no hay pregunta para una persona, el analista aplica la revisión y publica como **último comentario** el plan de acción para el desarrollador: ficheros, contratos, pasos en orden, tests y definición de hecho.
+
+   Las piezas de software que define el analista son las rutas y controladores (route handlers o server actions), los servicios, los repositorios de acceso a datos (el "DAO", con Prisma), los esquemas Zod, los componentes, las migraciones y los tests.
+3. **Desarrollo (`develop`, programador).** Trabaja en la rama `issue-<n>` que creó el analista y sigue el último "Plan de acción para el desarrollador". Implementa, escribe los tests, deja el linter, la comprobación de tipos y los tests en verde, sube la rama y, cuando la tarea está lista, abre la pull request con `Closes #<n>`. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
+
+### Aprobaciones y preguntas
+
+- Cuando un agente necesita una decisión de una persona, deja la pregunta en el issue (numerada y con una propuesta por defecto), añade la etiqueta `needs-info` y se detiene.
+- Al responder con un comentario en el issue, se vuelve a ejecutar la etapa de la etiqueta actual con el hilo completo.
+- Pasar de una etapa a la siguiente es siempre una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto.
 
 ### Convenciones de GitHub
 
-- Etiquetas de nivel: `epic`, `analysis`, `development`. Etiquetas de estado: `needs-info` (bloqueado por una pregunta), `ready` (listo para el siguiente nivel). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
+- Etiquetas de etapa: `analysis`, `design`, `develop`. Etiqueta de estado: `needs-info` (bloqueado por una pregunta). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
 - Todo issue hijo enlaza a su padre (`Padre: #<n>`) y el padre mantiene una lista de tareas con sus hijos.
-- Las plantillas de cada tipo de issue están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
+- Rama de trabajo: `issue-<n>`, donde `<n>` es el número del issue en etapa `design` y `develop`. La crea el analista y la usa el programador.
+- Las plantillas de issue y de comentario están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
 - Los issues y comentarios se escriben en el idioma del hilo (español por defecto).
 - Ningún agente fusiona ramas ni aprueba PRs; eso lo decide una persona.
 
 ### Cómo invocar a los agentes
 
-- Conversación directa con el arquitecto: `claude --agent architect`.
+- Desde GitHub: poner la etiqueta de la etapa en el issue. El workflow `.github/workflows/issue-pipeline.yml` ejecuta el agente que corresponde.
+- Conversación directa con un agente: `claude --agent architect` (o `analyst-programmer`, `developer`).
 - Desde una sesión normal: pedir "usa el agente analyst-programmer con el issue #12" (o `@agent-developer`).
-- Desde GitHub Actions: el workflow `.github/workflows/issue-pipeline.yml` ejecuta las etapas según la etiqueta del issue.
 
 ## Stack técnico
 

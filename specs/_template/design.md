@@ -1,8 +1,8 @@
 # <Nombre del módulo> — Diseño técnico
 
 - **Requisitos:** [README.md](README.md)
-- **Dueño del diseño:** analyst-programmer
-- **Issues:** #<analysis>
+- **Responsable:** analyst-programmer (escribe), architect (revisa)
+- **Issues:** #<issue de design>
 
 ## Resumen
 

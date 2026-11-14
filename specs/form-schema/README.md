@@ -2,7 +2,7 @@
 
 - **Prefijo:** `FSC`
 - **Estado:** borrador
-- **Dueño de los requisitos:** architect
+- **Responsable:** analyst-programmer (escribe), architect (revisa)
 
 ## Objetivo
 

@@ -1,6 +1,6 @@
 ---
 name: technical-design
-description: Cómo convertir una pieza funcional en un diseño técnico para el stack de FormIA (Next.js App Router, Prisma, Zod, Dexie) y desglosarlo en tareas de código - capas, nombres de ficheros, contratos, modelo de datos, estrategia de tests y tamaño de tareas. Úsala al escribir specs/<modulo>/design.md o issues "development".
+description: Cómo convertir una pieza funcional en un diseño técnico para el stack de FormIA (Next.js App Router, Prisma, Zod, Dexie) y en un plan de acción para el desarrollador - capas, nombres de ficheros, contratos, modelo de datos, estrategia de tests y tamaño de tareas. Úsala al escribir specs/<modulo>/design.md o el plan de acción de un issue en la etapa "design".
 ---
 
 # Diseño técnico y desglose en tareas
@@ -37,16 +37,16 @@ Si el proyecto ya tiene otra convención en el código, sigue la del código y d
 5. **Errores**: tabla de errores de dominio → código HTTP → mensaje en español para la interfaz.
 6. **Seguridad**: comprobación de rol, filtro por organización, validación de entrada, URLs firmadas, nada de datos personales en logs.
 7. **Tests**: para cada `CA-<MOD>-NN`, qué test lo cubre y de qué tipo.
-8. **Desglose** en tareas `development`.
+8. **Plan de acción** para el desarrollador: pasos en orden, publicado como último comentario del issue con la plantilla de la skill `github-issues`.
 
-## Reglas para desglosar tareas
+## Reglas para ordenar los pasos del plan
 
-- Una tarea = un cambio que se puede programar, probar y revisar por separado: idealmente menos de un día y de 2 a 8 ficheros.
+- Si el issue es demasiado grande para una sola pull request (más de un día de trabajo o unos 15 ficheros), díselo al arquitecto en el borrador y propón dividirlo en varios issues.
 - Orden habitual: modelo y migración → esquemas Zod → repositorio → servicio → entrada HTTP / actions → interfaz → e2e.
-- Las tareas de lógica pura (sin E/S) van primero: son las más fáciles de probar.
-- Cada tarea indica sus dependencias y deja el proyecto compilando y con los tests en verde.
-- Nada de tareas tipo "hacer el backend": tienen que nombrar ficheros y funciones.
-- Incluye siempre la tarea de datos de ejemplo (`prisma/seed.ts`) si la funcionalidad aparece en la demo.
+- Los pasos de lógica pura (sin E/S) van primero: son los más fáciles de probar.
+- Cada paso deja el proyecto compilando y con los tests en verde.
+- Nada de pasos tipo "hacer el backend": tienen que nombrar ficheros y funciones.
+- Incluye siempre el paso de datos de ejemplo (`prisma/seed.ts`) si la funcionalidad aparece en la demo.
 
 ## Calidad del diseño
 

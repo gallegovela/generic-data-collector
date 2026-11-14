@@ -1,24 +1,30 @@
 name: Issue pipeline
 
 # Label-gated stages, each running the local `claude` CLI on the
-# ionosL1 self-hosted runner, authenticated via CLAUDE_CODE_OAUTH_TOKEN
-# (a long-lived token from `claude setup-token`, stored as an
-# organization secret) -- not the anthropics/claude-code-action
-# marketplace action, which would need a redundant second auth path,
-# and not an interactive login on the runner host either (the token is
-# supplied per-run, nothing persists on the runner). See the design
-# doc for the full rationale (labels vs. Project Status, tool scoping
-# per stage, why check-permission exists).
+# ionosL1 self-hosted runner as one of the project agents defined in
+# .claude/agents/ (see CLAUDE.md, "Agentes y flujo de trabajo").
+# Authenticated via CLAUDE_CODE_OAUTH_TOKEN (a long-lived token from
+# `claude setup-token`, stored as an organization secret).
 #
-# documentation  -> propose a spec/ change plan, comment it. No writes.
-# preparation    -> create/reuse branch issue-<n>, apply the spec/
-#                   changes, commit, push.
-# implementation -> on branch issue-<n>, implement the code, commit, push.
-# merge          -> open a PR from issue-<n> to the default branch.
+# analysis -> architect. Reviews the request against the whole project,
+#             argues the architecture, points out errors and improvements,
+#             and creates one child issue per development piece. Read-only
+#             on the repository; writes only to GitHub issues.
+# design   -> analyst-programmer, supervised by the architect. Creates or
+#             reuses branch issue-<n>, updates specs/, and leaves the
+#             developer's action plan as the LAST comment of the issue:
+#               1. analyst drafts specs changes + plan (comment)
+#               2. architect reviews it (comment with a verdict)
+#               3. analyst applies the review and posts the final plan
+#             If a human decision is needed, the question is left in the
+#             issue with the `needs-info` label and the stage stops.
+# develop  -> developer. On branch issue-<n>, implements the final plan,
+#             runs lint/typecheck/tests, pushes and opens the PR.
 #
-# Re-triggers on a comment too (not just a fresh label), so answering
-# a clarifying question in the thread re-runs the *current* label's
-# stage without having to remove/re-add it.
+# Re-triggers on a human comment too (not just a fresh label), so
+# answering a question in the thread re-runs the *current* label's stage.
+# Comments and labels written by this workflow use GITHUB_TOKEN, which
+# never triggers new workflow runs, so the pipeline cannot loop on itself.
 
 on:
   issues:
@@ -31,17 +37,24 @@ permissions:
   issues: write
   pull-requests: write
 
+# One run at a time per issue; queue instead of cancelling so that a
+# comment posted mid-run is not lost.
+concurrency:
+  group: issue-pipeline-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 env:
-  # Org-level secret: a long-lived token from `claude setup-token`,
-  # not a per-user OAuth browser session -- lets every job authenticate
-  # without any interactive login step on the runner itself.
   CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  ISSUE_NUMBER: ${{ github.event.issue.number }}
+  BRANCH: issue-${{ github.event.issue.number }}
 
 jobs:
   check-permission:
-    # Hand-invoking the CLI (instead of the marketplace action) means
-    # we lose its built-in write-access check -- added back here,
-    # once, shared by every stage job via `needs`.
+    # Hand-invoking the CLI (instead of the marketplace action) means we
+    # lose its built-in write-access check -- added back here, once,
+    # shared by every stage job via `needs`. Also ignores PR comments and
+    # bot comments.
+    if: ${{ !github.event.issue.pull_request && (github.event_name != 'issue_comment' || github.event.comment.user.type != 'Bot') }}
     runs-on: ionos-l1-claude
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
@@ -57,38 +70,76 @@ jobs:
             echo "allowed=false" >> "$GITHUB_OUTPUT"
           fi
 
-  documentation:
+  # ---------------------------------------------------------------------
+  # Stage 1: analysis (architect)
+  # ---------------------------------------------------------------------
+  analysis:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'documentation') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'documentation')))
+    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'analysis') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'analysis')))
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
 
-      - name: Run Claude
+      - name: Architect - analysis
         env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          PROMPT="Review CLAUDE.md in full before anything else. Analyze issue #$ISSUE_NUMBER and its entire comment thread (gh issue view $ISSUE_NUMBER --comments). Your only responsibility in this stage is to propose a concrete action plan for the spec/ changes needed to resolve the issue, following the conventions and workflow documented in CLAUDE.md and spec/. Do not modify any file: this stage is analysis and proposal only. Reply in the same language the issue and its comments are written in."
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full, then specs/README.md and every specs/<module>/ that issue #$ISSUE_NUMBER may touch.
+          Read issue #$ISSUE_NUMBER and its whole thread: gh issue view $ISSUE_NUMBER --comments.
+          List the child issues it already has: gh issue list --state all --search "Padre: #$ISSUE_NUMBER in:body".
+
+          You are in the ANALYSIS stage. Your job:
+          1. Analyse the request against the whole project: architecture, module boundaries, data model, offline, multi-tenant, GDPR and the demo path.
+          2. Propose the architecture of the solution and ARGUE every decision (alternatives considered, pros and cons).
+          3. Point out errors, contradictions, risks and possible improvements, both in the request and in the current specs/, and give concrete suggestions on how to proceed.
+          4. If a decision needs the product owner's approval, ask it (numbered questions, each with a default proposal), add the label with
+             gh issue edit $ISSUE_NUMBER --add-label needs-info
+             and do NOT create child issues yet. If the thread already answers your previous questions, remove needs-info and continue.
+          5. Otherwise create one child issue per development piece (normally one per module affected), following the "design" issue template of the github-issues skill,
+             with gh issue create --title "..." --body "..." --label "module:<module>" (create a missing label with gh label create).
+             Pass the body inline with --body; do not use pipes, heredocs or temporary files. Do NOT add the design label: a human adds it to approve each child.
+             Do not duplicate children that already exist; update them with gh issue edit instead.
+          6. Update the task list of issue #$ISSUE_NUMBER with its children (gh issue edit $ISSUE_NUMBER --body "...", keeping the original text).
+          You must not modify any file in the repository.
+
+          Your final answer is posted verbatim as a comment on the issue: write it for the product owner, in the same language as the issue, with sections
+          Análisis, Arquitectura propuesta, Errores y mejoras detectados, Recomendaciones, Issues creados (or Preguntas pendientes) and Siguiente paso.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue create:*)" "Bash(gh issue edit:*)"
+            "Bash(gh label list:*)" "Bash(gh label create:*)"
+          )
           claude -p "$PROMPT" \
-            --dangerously-skip-permissions \
-            --allowedTools "Read Grep Glob Bash(gh issue view:*)" \
+            --agent architect \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
             --output-format text \
-            --max-budget-usd 2 \
-            | tee /tmp/claude_output.txt
+            --max-budget-usd 3 \
+            > /tmp/analysis.md
 
       - name: Post result comment
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/claude_output.txt
+        run: |
+          [ -s /tmp/analysis.md ] || echo "⚠️ La etapa de análisis ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/analysis.md
+          gh issue comment "$ISSUE_NUMBER" --body-file /tmp/analysis.md
 
-  preparation:
+  # ---------------------------------------------------------------------
+  # Stage 2: design (analyst-programmer, supervised by the architect)
+  # ---------------------------------------------------------------------
+  design:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'preparation') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'preparation')))
+    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'design') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'design')))
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Configure git remote and identity
         env:
@@ -99,10 +150,7 @@ jobs:
           git config user.email "noreply@anthropic.com"
 
       - name: Create or reuse the issue branch
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          BRANCH="issue-$ISSUE_NUMBER"
           git fetch origin "$BRANCH" 2>/dev/null || true
           if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH"; then
             git checkout -B "$BRANCH" "origin/$BRANCH"
@@ -110,32 +158,160 @@ jobs:
             git checkout -b "$BRANCH"
           fi
 
-      - name: Run Claude
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          PROMPT="Review CLAUDE.md in full before anything else. You are on branch issue-$ISSUE_NUMBER. Re-read issue #$ISSUE_NUMBER and its entire thread (gh issue view $ISSUE_NUMBER --comments), including the action plan already proposed in an earlier comment. Your only responsibility in this stage is to apply those changes to spec/, following the project's conventions. When done, commit and push branch issue-$ISSUE_NUMBER. Do not touch code outside spec/ in this stage. Reply in the same language the issue and its comments are written in."
-          claude -p "$PROMPT" \
-            --dangerously-skip-permissions \
-            --allowedTools "Read Write Edit Grep Glob Bash(git *) Bash(gh issue view:*)" \
-            --output-format text \
-            --max-budget-usd 4 \
-            | tee /tmp/claude_output.txt
-
-      - name: Post result comment
-        if: always()
+      - name: Analyst - draft design
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/claude_output.txt
+        run: |
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH.
+          Read issue #$ISSUE_NUMBER and its whole thread (gh issue view $ISSUE_NUMBER --comments), its parent issue and the specs/ of the modules involved.
 
-  implementation:
+          You are in the DESIGN stage, step 1 of 3 (draft). Your job:
+          1. Update specs/ with the new changes: requirements in specs/<module>/README.md and technical design in specs/<module>/design.md, following the spec-writing and technical-design skills.
+             Keep the change history of each file and cite issue #$ISSUE_NUMBER.
+          2. Commit the specs/ changes on $BRANCH (git add specs/ && git commit -m "docs(<module>): ... (#$ISSUE_NUMBER)"). Do not push. Do not touch anything outside specs/.
+          3. Draft the action plan for the developer: files to create or modify, signatures and contracts, step-by-step order, tests per acceptance criterion and definition of done.
+          4. List any doubt or decision you need approved. Address it to the architect, who reviews your work in the next step.
+
+          Your final answer is posted verbatim as a comment on the issue, in the same language as the issue, titled
+          "## Propuesta del analista (pendiente de revisión del arquitecto)", with sections Cambios en specs, Plan de acción (borrador) and Preguntas para el arquitecto.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Edit(specs/**)" "Write(specs/**)"
+            "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue list:*)"
+          )
+          claude -p "$PROMPT" \
+            --agent analyst-programmer \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
+            --output-format text \
+            --max-budget-usd 4 \
+            > /tmp/draft.md
+
+      - name: Post draft comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "$ISSUE_NUMBER" --body-file /tmp/draft.md
+
+      - name: Architect - review
+        id: review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH.
+          Read issue #$ISSUE_NUMBER and its whole thread (gh issue view $ISSUE_NUMBER --comments) and its parent issue.
+          The analyst-programmer has just posted a draft design (last comment) and committed specs/ changes: review them with git diff origin/main...HEAD -- specs/.
+
+          You are in the DESIGN stage, step 2 of 3: you supervise the analyst. Your job:
+          1. Check that the design fits the architecture agreed in the parent issue and in specs/, respects CLAUDE.md (multi-tenant, GDPR, offline, stack, scope of the pilot) and covers every acceptance criterion.
+          2. Point out errors, gaps and improvements, arguing each one, and answer the analyst's questions when you can.
+          3. Decide one verdict and write it on the FIRST line of your answer, exactly one of:
+             VEREDICTO: APROBADO        -> the analyst can publish the final plan as is
+             VEREDICTO: CAMBIOS         -> the analyst must apply your requested changes
+             VEREDICTO: PREGUNTA        -> a decision needs the product owner; ask it with numbered questions and a default proposal for each,
+                                           and add the label: gh issue edit $ISSUE_NUMBER --add-label needs-info
+          You must not modify any file in the repository.
+
+          Your final answer is posted verbatim as a comment on the issue, in the same language as the issue, titled "## Revisión del arquitecto" right after the verdict line.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)"
+          )
+          claude -p "$PROMPT" \
+            --agent architect \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
+            --output-format text \
+            --max-budget-usd 2 \
+            > /tmp/review.md
+          VERDICT=$(grep -oE 'VEREDICTO: (APROBADO|CAMBIOS|PREGUNTA)' /tmp/review.md | head -1 | cut -d' ' -f2)
+          echo "verdict=${VERDICT:-CAMBIOS}" >> "$GITHUB_OUTPUT"
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "$ISSUE_NUMBER" --body-file /tmp/review.md
+
+      - name: Analyst - final action plan
+        if: steps.review.outputs.verdict != 'PREGUNTA'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERDICT: ${{ steps.review.outputs.verdict }}
+        run: |
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH.
+          Read issue #$ISSUE_NUMBER and its whole thread (gh issue view $ISSUE_NUMBER --comments). The last two comments are your draft and the architect's review (verdict: $VERDICT).
+
+          You are in the DESIGN stage, step 3 of 3 (final). Your job:
+          1. Apply every change requested by the architect to specs/ and commit it on $BRANCH (do not push, do not touch anything outside specs/).
+             If you disagree with a point, argue it in your answer instead of ignoring it.
+          2. If the thread previously had the needs-info label and the questions are now answered, remove it: gh issue edit $ISSUE_NUMBER --remove-label needs-info
+          3. Write the FINAL action plan for the developer. It must be self-contained: the developer only reads this comment, CLAUDE.md and specs/.
+
+          Your final answer is posted verbatim as the LAST comment of the issue, in the same language as the issue, titled
+          "## Plan de acción para el desarrollador", with sections Contexto, Rama ($BRANCH), Specs de referencia, Ficheros (table: acción, ruta, contenido),
+          Contratos, Pasos en orden, Tests (one per acceptance criterion), Definición de hecho and Cambios respecto a la revisión del arquitecto.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Edit(specs/**)" "Write(specs/**)"
+            "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue edit:*)"
+          )
+          claude -p "$PROMPT" \
+            --agent analyst-programmer \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
+            --output-format text \
+            --max-budget-usd 3 \
+            > /tmp/plan.md
+
+      - name: Push the issue branch
+        if: always()
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ -n "$(git log "origin/$BRANCH..HEAD" 2>/dev/null || git log "origin/$DEFAULT_BRANCH..HEAD")" ]; then
+            git push -u origin "$BRANCH"
+          fi
+
+      - name: Post final plan comment
+        if: steps.review.outputs.verdict != 'PREGUNTA'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "$ISSUE_NUMBER" --body-file /tmp/plan.md
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+  # ---------------------------------------------------------------------
+  # Stage 3: develop (developer)
+  # ---------------------------------------------------------------------
+  develop:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'implementation') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'implementation')))
+    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'develop') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')))
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
         with:
           ref: issue-${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Configure git remote and identity
         env:
@@ -145,48 +321,48 @@ jobs:
           git config user.name "Claude (automated)"
           git config user.email "noreply@anthropic.com"
 
-      - name: Run Claude
+      - name: Developer - implement and open PR
         env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          PROMPT="Review CLAUDE.md in full before anything else. You are on branch issue-$ISSUE_NUMBER, which already has the spec/ changes for issue #$ISSUE_NUMBER applied. Re-read the issue and its entire thread (gh issue view $ISSUE_NUMBER --comments). Your only responsibility in this stage is to implement the code that fulfills that spec, following the order set in CLAUDE.md (db -> ingest -> backend -> frontend, as applicable to the change). When done, commit and push branch issue-$ISSUE_NUMBER. Reply in the same language the issue and its comments are written in."
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH, which already holds the specs/ changes for issue #$ISSUE_NUMBER.
+          Read the issue and its whole thread (gh issue view $ISSUE_NUMBER --comments). The comment titled "Plan de acción para el desarrollador"
+          (the latest one, if there are several) is your work order; follow it together with the specs/ it references.
+
+          You are in the DEVELOP stage. Your job:
+          1. Implement exactly what the plan says, with the tests it lists. Do not make design decisions: if the plan is incomplete or contradictory,
+             explain what is missing in your answer, add the label (gh issue edit $ISSUE_NUMBER --add-label needs-info) and stop.
+          2. Run npm run lint, npm run typecheck and npm test (and npm run test:e2e if the change touches the demo path) once package.json defines them. Fix any failure.
+          3. Commit with Conventional Commits in English citing #$ISSUE_NUMBER, and push: git push -u origin $BRANCH
+          4. When the task is ready (plan done, checks green), open the pull request against $DEFAULT_BRANCH, or update it if one already exists
+             (gh pr list --head $BRANCH): gh pr create --base $DEFAULT_BRANCH --head $BRANCH --title "<conventional title> (#$ISSUE_NUMBER)" --body "..."
+             The body summarises the changes, lists the requirements and acceptance criteria covered, the check results, and ends with "Closes #$ISSUE_NUMBER".
+             If the task is not ready, do not open the PR and explain why.
+
+          Your final answer is posted verbatim as a comment on the issue, in the same language as the issue: what was done, files touched,
+          check results, PR link (or what blocks it).
+          EOF
+          )
           claude -p "$PROMPT" \
+            --agent developer \
             --dangerously-skip-permissions \
-            --allowedTools "Read Write Edit Grep Glob Bash(git *) Bash(gh issue view:*)" \
             --output-format text \
-            --max-budget-usd 8 \
-            | tee /tmp/claude_output.txt
+            --max-budget-usd 10 \
+            > /tmp/develop.md
+
+      - name: Push any remaining commits
+        if: always()
+        run: |
+          if [ -n "$(git log "origin/$BRANCH..HEAD")" ]; then
+            git push -u origin "$BRANCH"
+          fi
 
       - name: Post result comment
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/claude_output.txt
-
-  merge:
-    needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'merge') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'merge')))
-    runs-on: ionos-l1-claude
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: issue-${{ github.event.issue.number }}
-
-      - name: Run Claude
-        env:
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
-          GH_TOKEN: ${{ github.token }}
         run: |
-          PROMPT="You are on branch issue-$ISSUE_NUMBER. Your only responsibility in this stage is to open a Pull Request from this branch against the repository's default branch, summarizing in the title and description the changes made for issue #$ISSUE_NUMBER (gh issue view $ISSUE_NUMBER --comments for full context). Use gh pr create. Reply in the same language the issue and its comments are written in."
-          claude -p "$PROMPT" \
-            --dangerously-skip-permissions \
-            --allowedTools "Read Bash(git *) Bash(gh pr create:*) Bash(gh issue view:*)" \
-            --output-format text \
-            --max-budget-usd 2 \
-            | tee /tmp/claude_output.txt
-
-      - name: Post result comment
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body-file /tmp/claude_output.txt
+          [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/develop.md
+          gh issue comment "$ISSUE_NUMBER" --body-file /tmp/develop.md

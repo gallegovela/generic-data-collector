@@ -8,8 +8,9 @@ description: Convenciones para crear y mantener las especificaciones de módulos
 ## Estructura
 
 - Un subdirectorio por módulo: `specs/<modulo>/`, nombre en inglés y kebab-case.
-- `README.md` obligatorio (requisitos; dueño: arquitecto). Plantilla: `specs/_template/README.md`.
-- `design.md` (diseño técnico; dueño: analista programador). Plantilla: `specs/_template/design.md`.
+- `README.md` obligatorio (requisitos). Plantilla: `specs/_template/README.md`.
+- `design.md` (diseño técnico). Plantilla: `specs/_template/design.md`.
+- Ambos los escribe el **analista programador** en la rama `issue-<n>` durante la etapa `design`. El **arquitecto** los propone y revisa en el issue, pero no los edita.
 - Otros `.md` opcionales: `flows.md`, `data-model.md`, `adr-NNN-<titulo>.md`.
 - Índice general en `specs/README.md`: añade una fila por módulo nuevo y actualiza su estado.
 
