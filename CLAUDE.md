@@ -2,6 +2,11 @@
 
 Guía del proyecto para Claude Code. Léela antes de cualquier tarea.
 
+Reglas de oro:
+
+- **La especificación manda.** Cada módulo del software se define en `specs/<modulo>/` antes de escribir código. Si el código y la especificación no coinciden, se para y se corrige primero la especificación (o se pregunta).
+- **Tres niveles de agente.** El trabajo pasa por el arquitecto, el analista programador y el programador, en ese orden, coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
+
 ## Qué es el proyecto
 
 **Nombre provisional:** FormIA
@@ -57,6 +62,75 @@ No sobredimensionar: nada de microservicios, colas ni multirregión en esta fase
 - Flujos de aprobación con varios pasos.
 - Integraciones con ERP o software de contabilidad concretos.
 
+## Especificaciones (`specs/`)
+
+Todo módulo del proyecto está creado y documentado en ficheros Markdown bajo la carpeta `specs/`. Es la fuente de verdad funcional y técnica: los agentes y las personas leen la especificación antes de diseñar o programar, y la actualizan en el mismo cambio que modifica el comportamiento.
+
+Estructura:
+
+```text
+specs/
+├── README.md                 # índice de módulos, estado y convenciones
+├── _template/                # plantillas para crear un módulo nuevo
+│   ├── README.md             # plantilla de requisitos (arquitecto)
+│   └── design.md             # plantilla de diseño técnico (analista)
+└── <modulo>/                 # un subdirectorio por módulo, nombre en inglés kebab-case
+    ├── README.md             # OBLIGATORIO: objetivo, alcance, requisitos, criterios de aceptación
+    ├── design.md             # diseño técnico: capas, ficheros, contratos, tests (analista)
+    └── *.md                  # opcional: flujos, decisiones (ADR), modelos de datos, etc.
+```
+
+Reglas:
+
+- Cada subdirectorio de `specs/` es un módulo y tiene **al menos un `README.md`** con sus requisitos principales.
+- Los requisitos se numeran con un prefijo por módulo y no se renumeran nunca: `RF-<MOD>-01` (funcional), `RNF-<MOD>-01` (no funcional), `CA-<MOD>-01` (criterio de aceptación). Si un requisito se elimina, se marca como `~~retirado~~`, no se borra su número.
+- Los issues, commits y tests citan los identificadores de requisito que cubren (`Cubre: RF-FSC-03`).
+- El `README.md` lo escribe y mantiene el **arquitecto**; el `design.md` lo escribe el **analista programador**; el **programador** no cambia los requisitos: si encuentra una contradicción, la anota en el issue y se detiene en ese punto.
+- Un módulo nuevo se crea copiando `specs/_template/` y se registra en el índice `specs/README.md`.
+- Textos de las especificaciones en español; nombres de módulo, rutas, tipos y código en inglés.
+
+## Agentes y flujo de trabajo
+
+El proyecto se desarrolla con tres agentes de Claude Code, definidos en `.claude/agents/`, y con skills propias en `.claude/skills/`. Cada agente tiene un nivel de responsabilidad y no invade el de los demás.
+
+| Nivel | Agente | Qué recibe | Qué entrega | Skills |
+| --- | --- | --- | --- | --- |
+| 1 | `architect` (arquitecto) | Conversaciones con el responsable del producto e issues de tipo `epic` | Requisitos en `specs/<modulo>/README.md`, decisiones de arquitectura e issues hijos con etiqueta `analysis` | `requirements-analysis`, `software-architecture`, `spec-writing`, `github-issues` |
+| 2 | `analyst-programmer` (analista programador) | Un issue `analysis` con contexto, diseño y objetivo | `specs/<modulo>/design.md` con capas, ficheros y contratos, e issues `development` listos para programar | `technical-design`, `spec-writing`, `github-issues` |
+| 3 | `developer` (programador) | Un issue `development` totalmente analizado | Código, tests y commits en la rama `issue-<n>`, y un comentario de cierre en el issue | `nextjs-development`, `github-issues` |
+
+### Recorrido de una funcionalidad
+
+```text
+Conversación / issue epic ──► architect ──► specs/<modulo>/README.md
+                                   │
+                                   └──► issues "analysis" (uno por pieza funcional)
+                                              │
+                                     analyst-programmer ──► specs/<modulo>/design.md
+                                              │
+                                              └──► issues "development" (uno por tarea de código)
+                                                         │
+                                                     developer ──► rama issue-<n>, código + tests
+```
+
+1. **Arquitecto.** Dialoga con el usuario (directamente con `claude --agent architect`, o leyendo el hilo de un issue de GitHub con `gh issue view <n> --comments`). Entiende el contexto, hace las preguntas necesarias, analiza el proyecto en conjunto, escribe o actualiza los requisitos en `specs/` y crea un issue `analysis` por cada subtarea, enlazado al issue padre.
+2. **Analista programador.** Toma un issue `analysis`, lee la especificación y el código existente, y define las piezas de software: rutas y controladores (route handlers o server actions), servicios, repositorios de acceso a datos (el "DAO", con Prisma), esquemas Zod, componentes, migraciones y tests. Lo documenta en `design.md` y crea un issue `development` por tarea, cada uno con la lista exacta de ficheros, firmas y criterios de aceptación.
+3. **Programador.** Toma un issue `development`, implementa exactamente lo diseñado en la rama `issue-<n>`, escribe los tests, deja el código compilando con el linter y los tests en verde, y comenta en el issue lo que ha hecho. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
+
+### Convenciones de GitHub
+
+- Etiquetas de nivel: `epic`, `analysis`, `development`. Etiquetas de estado: `needs-info` (bloqueado por una pregunta), `ready` (listo para el siguiente nivel). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
+- Todo issue hijo enlaza a su padre (`Padre: #<n>`) y el padre mantiene una lista de tareas con sus hijos.
+- Las plantillas de cada tipo de issue están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
+- Los issues y comentarios se escriben en el idioma del hilo (español por defecto).
+- Ningún agente fusiona ramas ni aprueba PRs; eso lo decide una persona.
+
+### Cómo invocar a los agentes
+
+- Conversación directa con el arquitecto: `claude --agent architect`.
+- Desde una sesión normal: pedir "usa el agente analyst-programmer con el issue #12" (o `@agent-developer`).
+- Desde GitHub Actions: el workflow `.github/workflows/issue-pipeline.yml` ejecuta las etapas según la etiqueta del issue.
+
 ## Stack técnico
 
 Decisiones iniciales; se pueden cambiar si hay un buen motivo, pero hay que hablarlo antes.
@@ -95,7 +169,7 @@ Entidades principales:
 Reglas:
 
 - Toda consulta se filtra por `organizationId`. Nunca debe haber datos de una organización visibles para otra.
-- El esquema del formulario se define una sola vez con Zod en `packages/form-schema` (o `src/lib/form-schema`) y se reutiliza en todas partes.
+- El esquema del formulario se define una sola vez con Zod en `src/lib/form-schema` y se reutiliza en todas partes (ver `specs/form-schema/`).
 - Cada respuesta lleva un `clientId` (UUID generado en el dispositivo) para que la sincronización sin conexión no cree duplicados.
 
 ## Asistente de IA
@@ -155,6 +229,8 @@ El seed debe crear una organización de ejemplo con su logo y colores, y tres fo
 Incluir algunas respuestas de ejemplo para que el panel no se vea vacío.
 
 ## Primeros pasos sugeridos
+
+Cada paso corresponde a uno o varios módulos de `specs/` (ver el orden en `specs/README.md`).
 
 1. Crear el proyecto Next.js con TypeScript, Tailwind, Prisma y docker-compose.
 2. Definir el esquema del formulario con Zod y escribir sus tests.
