@@ -84,6 +84,7 @@ No aplica: `platform` no define entidades de negocio propias. `prisma/schema.pri
 - **Resuelto** — Los workflows actuales de `.github/workflows/` (`tests.yml`, `deploy.yml`) procedían de otro proyecto (rutas `ingest/`, `control/backend`); `tests.yml` se reescribe por completo para este stack (ver [design.md](design.md)) y `deploy.yml` se adapta para usar `docker-compose.prod.yml`, pero mantiene el mismo runner propio y la misma estrategia (checkout persistente + `docker-compose build`/`up`).
 - **Resuelto** — Destino de la demo pública: el responsable de producto confirma en el issue #3 que no se usa Azure en ningún punto de este piloto; el despliegue de todo el proyecto se hace con `docker-compose` en el servidor donde corre el GitHub Runner propio (`ionos-l1-docker`). `CLAUDE.md` queda desactualizado en este punto; se debe corregir en un cambio aparte (fuera del alcance de `platform`, lo apunta el arquitecto).
 - **Resuelto** — RNF-PLT-03 exige alojamiento en la UE; el responsable de producto confirma en el issue #3 que el servidor donde corre el runner está alojado en la Unión Europea y sujeto a su legislación de protección de datos.
+- **Mejora futura, no bloquea el piloto** — `GET /api/health` no requiere rol y puede quedar expuesto públicamente; hoy solo filtra `ok`/`error` por dependencia (poca información). Si en el futuro se añaden más detalles (versión, latencias), conviene protegerlo o limitarlo a red interna. Apuntado por el arquitecto en la revisión del issue #3.
 
 ## Historial de cambios
 
