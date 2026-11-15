@@ -24,7 +24,8 @@ generator client {
 
 - Sin modelos ni migraciones en este módulo: `tenancy-auth` (#4) añade `Organization`/`User` y la primera migración real.
 - `npm run db:migrate` ejecuta `prisma migrate deploy`: con el esquema vacío no aplica nada y termina en 0, lo que ya cumple RF-PLT-02 (el comando existe y no falla). Para crear migraciones nuevas durante el desarrollo de otros módulos se usa `npx prisma migrate dev --name <nombre>` directamente (no hace falta un script propio).
-- `prisma.config.ts`/`package.json` incluye `"postinstall": "prisma generate"`.
+- `package.json` incluye `"postinstall": "prisma generate"` para que el cliente de Prisma se regenere tras `npm install` (por ejemplo, en la imagen Docker).
+- `package.json` también declara `"prisma": { "seed": "tsx prisma/seed.ts" }` para que `npx prisma db seed` (invocado por `npm run db:seed`) sepa qué script ejecutar. No se añade `prisma.config.ts`: no hace falta ninguna opción que ese fichero resuelva y que `package.json` no cubra ya.
 
 ## Estructura de ficheros
 
@@ -172,3 +173,4 @@ sequenceDiagram
 ## Historial de cambios
 
 - 2026-11-14 — Diseño técnico inicial (#3): estructura del proyecto, validación de entorno, endpoint de salud, docker-compose de desarrollo y producción, y adaptación de la CI existente.
+- 2026-11-15 — Correcciones del arquitecto (#3): separada la responsabilidad de `package.json` (`postinstall` y `"prisma": { "seed": ... }`) de `prisma.config.ts` (no se necesita en este módulo) en la sección "Modelo de datos", para que quede claro qué va en cada fichero.

@@ -27,7 +27,7 @@ Proporcionar el esqueleto técnico sobre el que se construyen los demás módulo
 **Fuera de alcance**
 - Multirregión, autoescalado, colas o microservicios.
 - Variables de entorno, integraciones o modelos de datos de otros módulos (autenticación, IA, email, exportaciones): cada uno los añade cuando se diseñe.
-- Despliegue en Azure: se mantiene el runner propio con `docker-compose` que ya usa el proyecto (ver "Supuestos y preguntas abiertas"); migrar a Azure queda fuera de este módulo.
+- Azure: no se usa para nada en este piloto. El despliegue de todo el proyecto se hace con `docker-compose` en el servidor donde corre el GitHub Runner propio (`ionos-l1-docker`), confirmado por el responsable de producto en el issue #3.
 
 ## Actores
 
@@ -59,6 +59,14 @@ Proporcionar el esqueleto técnico sobre el que se construyen los demás módulo
 | RNF-PLT-03 | Must | El entorno de demo se aloja en la UE. |
 | RNF-PLT-04 | Should | Un desarrollador nuevo tiene la demo funcionando en local en menos de 15 minutos siguiendo el README raíz. |
 
+## Flujos principales
+
+No aplica: `platform` es un módulo de infraestructura sin flujos de usuario propios. El único flujo relevante es el de arranque/monitorización, ya documentado como diagrama de secuencia en [design.md](design.md#flujos).
+
+## Datos
+
+No aplica: `platform` no define entidades de negocio propias. `prisma/schema.prisma` solo contiene los bloques `datasource`/`generator`; las primeras entidades (`Organization`, `User`) las añade [tenancy-auth](../tenancy-auth/README.md).
+
 ## Dependencias
 
 - Depende de: ninguno.
@@ -69,15 +77,16 @@ Proporcionar el esqueleto técnico sobre el que se construyen los demás módulo
 - **CA-PLT-01** — Dado un clon limpio del repositorio con `.env` copiado de `.env.example`, cuando se ejecutan `docker compose up -d`, `npm install`, `npm run db:migrate`, `npm run db:seed` y `npm run dev`, entonces la aplicación responde en `http://localhost:3000`.
 - **CA-PLT-02** — Dado un push con un error de tipos, cuando corre la CI, entonces el trabajo falla.
 - **CA-PLT-03** — Dada una variable obligatoria sin definir, cuando arranca la aplicación, entonces se detiene indicando el nombre de la variable.
-- **CA-PLT-04** — Dada la base de datos y el almacenamiento accesibles, cuando se consulta `GET /api/health`, entonces responde 200 con `{"status":"ok"}`; si alguno no está accesible, responde 503 indicando cuál.
+- **CA-PLT-04** — Dada la base de datos y el almacenamiento accesibles, cuando se consulta `GET /api/health`, entonces responde 200 con un cuerpo `HealthCheckResult` cuyo campo `status` es `"ok"` (entre otros campos, ver `checks` en [design.md](design.md#contratos)); si alguno no está accesible, responde 503 con `status: "error"` indicando en `checks` cuál ha fallado.
 
 ## Supuestos y preguntas abiertas
 
 - **Resuelto** — Los workflows actuales de `.github/workflows/` (`tests.yml`, `deploy.yml`) procedían de otro proyecto (rutas `ingest/`, `control/backend`); `tests.yml` se reescribe por completo para este stack (ver [design.md](design.md)) y `deploy.yml` se adapta para usar `docker-compose.prod.yml`, pero mantiene el mismo runner propio y la misma estrategia (checkout persistente + `docker-compose build`/`up`).
-- **Pendiente de confirmar por el arquitecto** — Destino de la demo pública: `CLAUDE.md` indica Azure (contenedores) como objetivo, pero la infraestructura ya existente (`deploy.yml`) usa un runner propio (`ionos-l1-docker`) con `docker-compose`. Propuesta de este módulo: mantener el runner propio para el piloto (reutiliza lo que ya existe, coste cero, sin nueva infraestructura que aprender) y dejar la migración a Azure como trabajo futuro fuera del piloto, documentado aquí. Ver pregunta 1 en el issue #3.
-- **Pendiente de confirmar por el arquitecto** — RNF-PLT-03 exige alojamiento en la UE; se asume que el runner `ionos-l1-docker` (IONOS) está en un centro de datos de la UE, pero el módulo `platform` no puede verificarlo por sí mismo. Ver pregunta 2 en el issue #3.
+- **Resuelto** — Destino de la demo pública: el responsable de producto confirma en el issue #3 que no se usa Azure en ningún punto de este piloto; el despliegue de todo el proyecto se hace con `docker-compose` en el servidor donde corre el GitHub Runner propio (`ionos-l1-docker`). `CLAUDE.md` queda desactualizado en este punto; se debe corregir en un cambio aparte (fuera del alcance de `platform`, lo apunta el arquitecto).
+- **Resuelto** — RNF-PLT-03 exige alojamiento en la UE; el responsable de producto confirma en el issue #3 que el servidor donde corre el runner está alojado en la Unión Europea y sujeto a su legislación de protección de datos.
 
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-14 — Alcance y requisitos revisados para el diseño técnico: comandos `build`/`start`, volúmenes persistentes, `.env.example` acotado a las variables de este módulo, nuevo CA-PLT-04 para el endpoint de salud, y resolución parcial de las preguntas abiertas (#3).
+- 2026-11-15 — Aplicadas las correcciones del arquitecto (#3): se resuelve sin ambigüedad que no se usa Azure (confirmado por el responsable de producto) y que el servidor del runner está en la UE; se añaden las secciones "Flujos principales" y "Datos" (ambas "no aplica", explícitas); se amplía el texto de CA-PLT-04 para que cubra el cuerpo completo de `HealthCheckResult`.
