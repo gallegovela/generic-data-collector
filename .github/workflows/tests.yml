@@ -1,35 +1,38 @@
 name: Tests
 
-# Runs on every push (any branch) and every pull request, unconditionally
-# -- no path filter, so a change anywhere (not just in the tests
-# themselves) that breaks a test still gets caught (spec/testing.md).
+# Se ejecuta en cada push y cada pull request, sin filtro de rutas
+# (RF-PLT-05, CA-PLT-02: cualquier error de tipos hace fallar el job).
 
 on:
   push:
   pull_request:
 
 jobs:
-  ingest-tests:
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - run: pip install -r ingest/requirements.txt
-      - run: pytest ingest/tests/ --ignore=ingest/tests/integration
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
-  # Separate from ingest-tests (spec/testing.md, "Continuous integration"):
-  # needs a real Postgres, kept out of the fast DB-free unit job.
-  ingest-integration-tests:
+  # RF-PLT-06: tests e2e contra una base de datos de pruebas real.
+  e2e:
     runs-on: ubuntu-latest
+    needs: unit
     services:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: weather
-          POSTGRES_PASSWORD: weather
-          POSTGRES_DB: weather
+          POSTGRES_USER: formia
+          POSTGRES_PASSWORD: formia
+          POSTGRES_DB: formia
         ports:
           - 5432:5432
         options: >-
@@ -38,23 +41,21 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql+psycopg://weather:weather@localhost:5432/weather
+      NODE_ENV: test
+      DATABASE_URL: postgresql://formia:formia@localhost:5432/formia
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: eu-west-1
+      S3_ACCESS_KEY: changeme
+      S3_SECRET_KEY: changeme
+      S3_BUCKET: formia
+      S3_FORCE_PATH_STYLE: "true"
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - run: pip install -r db/requirements.txt -r ingest/requirements.txt
-      - run: python db/migrate.py upgrade
-      - run: pytest ingest/tests/integration/
-
-  backend-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -r control/backend/requirements.txt
-      - run: pytest tests/
-        working-directory: control/backend
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:migrate
+      - run: npm run test:e2e
