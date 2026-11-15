@@ -1,0 +1,25 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - minio
+      - mailpit
+
+  # En producción solo la app expone puerto hacia el exterior; el resto
+  # de servicios queda accesible únicamente en la red interna de Docker.
+  postgres:
+    ports: []
+
+  minio:
+    ports: []
+
+  mailpit:
+    ports: []
