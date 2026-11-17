@@ -11,8 +11,10 @@ name: Deploy
 on:
   push:
     branches: [main]
-  # Merges made by the issue pipeline's merge stage use GITHUB_TOKEN and
-  # do not fire `push`; that stage dispatches this workflow instead.
+  # The issue pipeline's merge stage merges as the architect's GitHub
+  # App, which fires `push`. Only when the App (or ARCHITECT_GH_TOKEN) is
+  # not configured does it merge with GITHUB_TOKEN, which does not fire
+  # `push`, and dispatch this workflow instead.
   workflow_dispatch:
 
 permissions:

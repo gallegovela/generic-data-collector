@@ -54,11 +54,15 @@ name: Issue pipeline
 # `stage`), which GITHUB_TOKEN is allowed to do. The same inputs let a
 # person re-run a stage by hand from the Actions tab.
 #
-# The merge stage approves and merges with secrets.ARCHITECT_GH_TOKEN
-# when it exists (a token of an account other than the one that opened
-# the PRs: GitHub does not let the PR author approve it). A merge made
-# with that token fires `push` and deploys by itself; a merge made with
-# GITHUB_TOKEN does not, so the stage dispatches deploy.yml instead.
+# The merge stage approves and merges as the architect's GitHub App: a
+# one-hour installation token generated from vars.ARCHITECT_APP_ID and
+# secrets.ARCHITECT_APP_PRIVATE_KEY. It needs an identity other than the
+# PR author because GitHub does not let the author approve its own PR.
+# Fallbacks, in order: secrets.ARCHITECT_GH_TOKEN (a PAT of a bot
+# account), then GITHUB_TOKEN (approval fails on PRs it opened). A merge
+# made with the App token or the PAT fires `push` and deploys by itself;
+# a merge made with GITHUB_TOKEN does not, so the stage dispatches
+# deploy.yml instead.
 
 on:
   issues:
@@ -660,11 +664,21 @@ jobs:
           printf '## Etapa merge: en espera\n\nNo se fusiona nada: un módulo se fusiona en un solo paso y hay issues del módulo que no están listos. La etapa se repetirá cuando otro issue del módulo pase a `merge`.\n\n%s\n' "$SUMMARY" > /tmp/merge.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/merge.md
 
+      # Short-lived token of the architect's GitHub App, scoped to this
+      # repository. Skipped when the App is not configured.
+      - name: Get the architect App token
+        id: architect-token
+        if: steps.gate.outputs.ready == 'true' && vars.ARCHITECT_APP_ID != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.ARCHITECT_APP_ID }}
+          private-key: ${{ secrets.ARCHITECT_APP_PRIVATE_KEY }}
+
       - name: Architect - review, global test or approve and merge
         if: steps.gate.outputs.ready == 'true'
         env:
           # A different identity from the PR author is needed to approve.
-          GH_TOKEN: ${{ secrets.ARCHITECT_GH_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.architect-token.outputs.token || secrets.ARCHITECT_GH_TOKEN || github.token }}
           PRS: ${{ steps.gate.outputs.prs }}
           INTEGRATION: ${{ steps.gate.outputs.integration }}
           MODULES: ${{ steps.gate.outputs.modules }}
@@ -746,7 +760,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.gate.outputs.prs }}
           INTEGRATION: ${{ steps.gate.outputs.integration }}
-          HAS_ARCHITECT_TOKEN: ${{ secrets.ARCHITECT_GH_TOKEN != '' }}
+          HAS_ARCHITECT_TOKEN: ${{ steps.architect-token.outputs.token != '' || secrets.ARCHITECT_GH_TOKEN != '' }}
         run: |
           MERGED=""
           for PR in $(echo "$PRS $INTEGRATION" | grep -oE '"pr":[0-9]+' | cut -d: -f2); do
@@ -755,8 +769,9 @@ jobs:
             fi
           done
           echo "merged=$MERGED" >> "$GITHUB_OUTPUT"
-          # A merge made with ARCHITECT_GH_TOKEN fires `push` and deploy.yml
-          # runs by itself; with GITHUB_TOKEN it must be dispatched.
+          # A merge made with the App token or ARCHITECT_GH_TOKEN fires
+          # `push` and deploy.yml runs by itself; with GITHUB_TOKEN it must
+          # be dispatched.
           if [ -n "$MERGED" ] && [ "$HAS_ARCHITECT_TOKEN" != "true" ]; then
             gh workflow run deploy.yml --ref "$DEFAULT_BRANCH"
           fi

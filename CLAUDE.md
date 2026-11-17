@@ -174,7 +174,7 @@ architect: aprueba y fusiona TODAS las PRs del módulo (la de integración la ú
 - Rama de trabajo: `issue-<n>`, donde `<n>` es el número del issue en etapa `design` y `develop`. La crea el analista y la usa el programador.
 - Las plantillas de issue y de comentario están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
 - Los issues y comentarios se escriben en el idioma del hilo (español por defecto).
-- Solo el arquitecto aprueba y fusiona PRs, y solo en la etapa `merge`, cuando todos los issues abiertos del módulo están listos. Para aprobar usa el secret `ARCHITECT_GH_TOKEN` (una cuenta distinta de la que abre las PRs, porque GitHub no deja que el autor apruebe su propia PR). Una persona puede fusionar a mano en cualquier momento.
+- Solo el arquitecto aprueba y fusiona PRs, y solo en la etapa `merge`, cuando todos los issues abiertos del módulo están listos. Para aprobar actúa como una GitHub App propia (variable `ARCHITECT_APP_ID` y secret `ARCHITECT_APP_PRIVATE_KEY`; el workflow genera un token de una hora en cada ejecución), porque GitHub no deja que el autor de la PR la apruebe. Si la App no está configurada, usa el secret `ARCHITECT_GH_TOKEN` (token de una cuenta bot) y, en último caso, el token del workflow, con el que la aprobación falla. Una persona puede fusionar a mano en cualquier momento.
 
 ### Cómo invocar a los agentes
 
