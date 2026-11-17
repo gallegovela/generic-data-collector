@@ -25,6 +25,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
 | PP-FSC-G3 | `npm test` |
 | PP-FSC-G4 | `npm run build` |
 | PP-FSC-G5 | `npm run test:e2e` — no aplica: este issue no toca el recorrido de la demo (sin interfaz todavía). |
+| PP-FSC-G6 | `npx vitest run --coverage` — cubre RNF-FSC-02 (umbral de cobertura ≥90 % de `src/lib/form-schema`, configurado en `vitest.config.ts`); código de salida 0. |
 
 ## Casos de prueba
 
@@ -37,7 +38,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/form-version.schema.test.ts -t "CA-FSC-01"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed` (ningún test omitido).
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-01» pasan, sin ninguno fallido ni omitido.
 
 ### PP-FSC-02 — Campo obligatorio oculto no bloquea el envío
 
@@ -48,7 +49,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/submission.test.ts -t "CA-FSC-02"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-02» pasan, sin ninguno fallido ni omitido.
 
 ### PP-FSC-03 — Límite numérico rechazado
 
@@ -59,7 +60,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/submission.test.ts -t "CA-FSC-03"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-03» pasan, sin ninguno fallido ni omitido.
 
 ### PP-FSC-04 — Los tres formularios de ejemplo son válidos
 
@@ -70,7 +71,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/fixtures/demo-forms.test.ts -t "CA-FSC-04"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed` (los tres `FormVersion` de `fixtures/demo-forms.ts` validan sin error).
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-04» pasan, sin ninguno fallido ni omitido (los tres `FormVersion` de `fixtures/demo-forms.ts` validan sin error).
 
 ### PP-FSC-05 — Referencia de condición inexistente, posterior o circular rechazada
 
@@ -81,7 +82,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/form-version.schema.test.ts -t "CA-FSC-05"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-05» pasan, sin ninguno fallido ni omitido (cubre los tres sub-casos: referencia inexistente, posterior y circular; pueden ser varios `it()` distintos, el número exacto no importa).
 
 ### PP-FSC-06 — Operador "includes" evalúa la visibilidad de un campo `multiple_choice`
 
@@ -92,7 +93,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/condition.schema.test.ts -t "CA-FSC-06"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-06» pasan, sin ninguno fallido ni omitido.
 
 ### PP-FSC-07 — Operador "isAnswered" evalúa la visibilidad
 
@@ -103,7 +104,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/condition.schema.test.ts -t "CA-FSC-07"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-07» pasan, sin ninguno fallido ni omitido.
 
 ### PP-FSC-08 — Id de opción estable tras renombrar la etiqueta
 
@@ -114,7 +115,7 @@ Se ejecutan siempre, en este orden, y todas tienen que terminar con código 0:
   ```bash
   npx vitest run src/lib/form-schema/field.schema.test.ts -t "CA-FSC-08"
   ```
-- **Resultado esperado:** código de salida 0; la salida indica `1 passed`.
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-FSC-08» pasan, sin ninguno fallido ni omitido.
 
 ## Pruebas globales del módulo
 
@@ -122,7 +123,7 @@ Todavía no existe: solo hay un issue de desarrollo en este módulo (#5). Se añ
 
 ## Comprobaciones manuales
 
-- [ ] Cobertura de líneas de `src/lib/form-schema` ≥ 90 % (RNF-FSC-02). Pendiente de que el arquitecto confirme si se automatiza con `@vitest/coverage-v8` (ver pregunta en el issue #5); mientras no se automatice, revisar el informe de cobertura a mano.
+Ninguna: la cobertura (RNF-FSC-02) se comprueba sola con `PP-FSC-G6` (ver "Comprobaciones generales").
 
 ## Limpieza
 
@@ -131,3 +132,4 @@ Ninguna: este módulo no levanta ningún servicio (no hay `docker compose` que p
 ## Historial de cambios
 
 - 2026-11-17 — Plan de pruebas inicial: PP-FSC-01 a PP-FSC-08 (#5).
+- 2026-11-17 — Revisión del arquitecto aplicada (#5): añadido `PP-FSC-G6` (`npx vitest run --coverage`, automatiza RNF-FSC-02 y sustituye la comprobación manual); reformulado el "Resultado esperado" de todos los casos para que no dependa del número exacto de sub-tests («todos los tests cuyo título contiene «CA-FSC-NN» pasan, sin ninguno fallido ni omitido»).

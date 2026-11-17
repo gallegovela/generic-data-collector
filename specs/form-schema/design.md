@@ -77,6 +77,8 @@ export const FileRefSchema: z.ZodType<FileRef>;
 export type FileRef = { key: string; originalName?: string; mimeType?: string; sizeBytes?: number };
 
 export const GpsAnswerSchema: z.ZodType<GpsAnswer>;
+// { lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180),
+//   accuracy: z.number().nonnegative(), capturedAt: z.string().datetime() }
 export type GpsAnswer = { lat: number; lng: number; accuracy: number; capturedAt: string };
 
 // Propiedades comunes a todo campo (BaseFieldSchema, no exportado):
@@ -107,8 +109,14 @@ export function buildFieldAnswerSchema(field: Field): z.ZodType<unknown>;
 // a partir de field.type y field.config:
 //  text -> z.string() [+ .min(minLength)/.max(maxLength) si están definidos]
 //  number -> z.number() [+ .min(min)/.max(max)]
-//  date -> z.string().date() [+ comparación min/max en el servicio, no en el tipo]
-//  datetime -> z.string().datetime()
+//  date -> z.string().date().superRefine((value, ctx) => ...): compara `value` con
+//          field.config.min/max; los strings ISO-8601 de `date` ordenan igual
+//          lexicográfica y cronológicamente, así que basta `value < min` / `value > max`.
+//          Mensajes: `La fecha debe ser posterior o igual a "<min>".` /
+//          `La fecha debe ser anterior o igual a "<max>".`
+//  datetime -> z.string().datetime().superRefine(<mismo refinamiento que date, sobre
+//          field.config.min/max, con los mensajes "La fecha y hora debe ser posterior o
+//          igual a ..."/"La fecha y hora debe ser anterior o igual a ...">)
 //  time -> z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 //  single_choice -> z.string().refine(v => field.config.options.some(o => o.id === v))
 //  multiple_choice -> z.array(<option id válido>) [+ .min(minSelected)/.max(maxSelected)]
@@ -243,8 +251,30 @@ No aplica una tabla HTTP: el módulo no tiene entrada HTTP (RNF-FSC-01). Lo que 
 | CA-FSC-02 | Vitest | `src/lib/form-schema/submission.test.ts` |
 | CA-FSC-03 | Vitest | `src/lib/form-schema/submission.test.ts` |
 | CA-FSC-04 | Vitest | `src/lib/form-schema/fixtures/demo-forms.test.ts` |
+| RF-FSC-03 (límites `min`/`max` de `date` y `datetime`) | Vitest | `src/lib/form-schema/answer.schema.test.ts` |
 
-Cada `it(...)` que cubra un criterio de aceptación incluye el identificador literal en el título (por ejemplo `it("CA-FSC-01 — rechaza ids de campo duplicados", ...)`), para poder filtrarlo con `vitest run <fichero> -t "CA-FSC-01"` desde `test-plan.md`.
+Cada `it(...)` que cubra un criterio de aceptación incluye el identificador literal en el título (por ejemplo `it("CA-FSC-01 — rechaza ids de campo duplicados", ...)`), para poder filtrarlo con `vitest run <fichero> -t "CA-FSC-01"` desde `test-plan.md`. La fila de `RF-FSC-03` no tiene un `CA-FSC` propio (no lo pedía el issue); no lleva caso dedicado en `test-plan.md` y queda cubierta por `PP-FSC-G3` (`npm test`) y por el umbral de cobertura (`PP-FSC-G6`, ver abajo).
+
+### Cobertura (RNF-FSC-02)
+
+Para que el umbral de cobertura se compruebe solo, sin revisión manual, el desarrollador añade:
+
+- **devDependency** `@vitest/coverage-v8` (misma rama mayor que `vitest`, hoy `^5`): es el proveedor de cobertura estándar de Vitest, ya implícito en el stack de `CLAUDE.md` (no es una dependencia nueva de funcionalidad, solo el motor de cobertura del test runner que ya se usa).
+- En `vitest.config.ts`, dentro de `test`, el bloque:
+  ```ts
+  coverage: {
+    provider: "v8",
+    include: ["src/lib/form-schema/**"],
+    thresholds: {
+      lines: 90,
+      statements: 90,
+      branches: 90,
+      functions: 90,
+    },
+  },
+  ```
+  `include` se limita a `src/lib/form-schema/**` porque es el único módulo con código fuente por ahora; cuando otro módulo necesite medir su propia cobertura, su analista ampliará `include` o moverá el umbral a una configuración por módulo (riesgo anotado en "Supuestos y preguntas abiertas" del README).
+- Con esto, `npx vitest run --coverage` (caso general `PP-FSC-G6` del plan de pruebas) termina con código ≠0 si alguna de las cuatro métricas no llega al 90 % en `src/lib/form-schema`.
 
 ## Tareas de desarrollo
 
@@ -258,7 +288,9 @@ Cada `it(...)` que cubra un criterio de aceptación incluye el identificador lit
 | 6 | #5 | `submission.ts` + test (`getVisibleFields`, `isFieldVisible`, `validateSubmission`) | 1, 4, 5 |
 | 7 | #5 | `fixtures/demo-forms.ts` + test (los tres formularios de la demo) | 5 |
 | 8 | #5 | `index.ts` (barril de exportación) | 1-7 |
+| 9 | #5 | Añadir devDependency `@vitest/coverage-v8` y los `thresholds` en `vitest.config.ts` (RNF-FSC-02); comprobar `npx vitest run --coverage` en verde | 1-8 |
 
 ## Historial de cambios
 
 - 2026-11-17 — Diseño inicial (#5).
+- 2026-11-17 — Revisión del arquitecto aplicada (#5): umbral de cobertura de RNF-FSC-02 automatizado con `@vitest/coverage-v8` y `thresholds` en `vitest.config.ts` (sustituye la comprobación manual); contrato exacto del límite `min`/`max` de `date`/`datetime` en `buildFieldAnswerSchema` (comparación lexicográfica de strings ISO-8601); validadores exactos de `GpsAnswerSchema`.
