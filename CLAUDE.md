@@ -5,7 +5,7 @@ Guía del proyecto para Claude Code. Léela antes de cualquier tarea.
 Reglas de oro:
 
 - **La especificación manda.** Cada módulo del software se define en `specs/<modulo>/` antes de escribir código. Si el código y la especificación no coinciden, se para y se corrige primero la especificación (o se pregunta).
-- **Tres etapas, tres agentes.** El trabajo pasa por `analysis` (arquitecto), `design` (analista programador, revisado por el arquitecto) y `develop` (programador), coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
+- **Cuatro etapas, tres agentes.** El trabajo pasa por `analysis` (arquitecto), `design` (analista programador, revisado por el arquitecto), `develop` (programador) y `testPR` (analista programador, con la etiqueta `pr-raised`), coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
 
 ## Qué es el proyecto
 
@@ -73,10 +73,12 @@ specs/
 ├── README.md                 # índice de módulos, estado y convenciones
 ├── _template/                # plantillas para crear un módulo nuevo
 │   ├── README.md             # plantilla de requisitos
-│   └── design.md             # plantilla de diseño técnico
+│   ├── design.md             # plantilla de diseño técnico
+│   └── test-plan.md          # plantilla del plan de pruebas
 └── <modulo>/                 # un subdirectorio por módulo, nombre en inglés kebab-case
     ├── README.md             # OBLIGATORIO: objetivo, alcance, requisitos, criterios de aceptación
     ├── design.md             # diseño técnico: capas, ficheros, contratos, tests (analista)
+    ├── test-plan.md          # plan de pruebas que se ejecuta antes de fusionar la PR (analista)
     └── *.md                  # opcional: flujos, decisiones (ADR), modelos de datos, etc.
 ```
 
@@ -85,7 +87,7 @@ Reglas:
 - Cada subdirectorio de `specs/` es un módulo y tiene **al menos un `README.md`** con sus requisitos principales.
 - Los requisitos se numeran con un prefijo por módulo y no se renumeran nunca: `RF-<MOD>-01` (funcional), `RNF-<MOD>-01` (no funcional), `CA-<MOD>-01` (criterio de aceptación). Si un requisito se elimina, se marca como `~~retirado~~`, no se borra su número.
 - Los issues, commits y tests citan los identificadores de requisito que cubren (`Cubre: RF-FSC-03`).
-- Quien escribe en `specs/` es el **analista programador** (tanto el `README.md` de requisitos como el `design.md`), siempre en la rama `issue-<n>` y bajo la revisión del **arquitecto**, que propone y argumenta los cambios en el issue pero no edita ficheros. El **programador** no cambia las especificaciones: si encuentra una contradicción, la anota en el issue y se detiene en ese punto.
+- Quien escribe en `specs/` es el **analista programador** (el `README.md` de requisitos, el `design.md` y el `test-plan.md`), siempre en la rama `issue-<n>` y bajo la revisión del **arquitecto**, que propone y argumenta los cambios en el issue pero no edita ficheros. El **programador** no cambia las especificaciones: si encuentra una contradicción, la anota en el issue y se detiene en ese punto.
 - Un módulo nuevo se crea copiando `specs/_template/` y se registra en el índice `specs/README.md`.
 - Textos de las especificaciones en español; nombres de módulo, rutas, tipos y código en inglés.
 
@@ -93,13 +95,14 @@ Reglas:
 
 El proyecto se desarrolla con tres agentes de Claude Code, definidos en `.claude/agents/`, y con skills propias en `.claude/skills/`. Cada agente tiene un nivel de responsabilidad y no invade el de los demás.
 
-El trabajo avanza por issues de GitHub en tres etapas. Cada etapa se activa poniendo su etiqueta en el issue y la ejecuta un agente:
+El trabajo avanza por issues de GitHub en cuatro etapas. Cada etapa se activa poniendo su etiqueta en el issue y la ejecuta un agente:
 
 | Etapa (etiqueta) | Agente | Qué recibe | Qué entrega | Skills |
 | --- | --- | --- | --- | --- |
 | `analysis` | `architect` (arquitecto) | Una necesidad del producto, en un issue o en conversación | Comentario con la arquitectura argumentada, errores y mejoras detectados y recomendaciones; un issue hijo por cada pieza de desarrollo | `requirements-analysis`, `software-architecture`, `spec-writing`, `github-issues` |
-| `design` | `analyst-programmer` (analista programador), revisado por el `architect` | Un issue hijo creado por el arquitecto | Rama `issue-<n>` con `specs/` actualizado, y como **último comentario** del issue el plan de acción para el desarrollador | `technical-design`, `spec-writing`, `github-issues` |
-| `develop` | `developer` (programador) | El issue con su plan de acción y la rama `issue-<n>` | Código y tests en la rama `issue-<n>` y una pull request que cierra el issue | `nextjs-development`, `github-issues` |
+| `design` | `analyst-programmer` (analista programador), revisado por el `architect` | Un issue hijo creado por el arquitecto | Rama `issue-<n>` con `specs/` actualizado (requisitos, diseño y plan de pruebas), y como **último comentario** del issue el plan de acción para el desarrollador | `technical-design`, `spec-writing`, `test-plan`, `github-issues` |
+| `develop` | `developer` (programador) | El issue con su plan de acción y la rama `issue-<n>` | Código y tests en la rama `issue-<n>`, una pull request que cierra el issue, y la etiqueta del issue cambiada de `develop` a `pr-raised` | `nextjs-development`, `github-issues` |
+| `testPR` (etiqueta `pr-raised`) | `analyst-programmer` (analista programador) | El issue con la PR abierta y `specs/<modulo>/test-plan.md` | El plan de pruebas ejecutado sobre la rama de la PR y el resultado (`SUPERADO`, `FALLIDO` o `BLOQUEADO`) como comentario en la PR | `test-plan`, `github-issues` |
 
 ### Recorrido de una funcionalidad
 
@@ -117,31 +120,38 @@ issue hijo (etiqueta design) ──► analyst-programmer: rama issue-<n> + spec
                                                 │  una persona pone "develop"
                                                 ▼
 issue hijo (etiqueta develop) ──► developer: código + tests en issue-<n> ──► pull request
+                                                │  el developer cambia develop por pr-raised
+                                                ▼
+issue hijo (etiqueta pr-raised) ──► analyst-programmer: ejecuta specs/<modulo>/test-plan.md ──► resultado en la PR
+                                                │  una persona revisa y fusiona
+                                                ▼
+                                              main
 ```
 
 1. **Análisis (`analysis`, arquitecto).** Lee el issue y todo su hilo, analiza el proyecto en conjunto y propone la arquitectura argumentando cada decisión. Señala errores, contradicciones, riesgos y posibles mejoras, tanto en la petición como en `specs/`, y da recomendaciones sobre cómo actuar. Crea un issue hijo por cada pieza de desarrollo (normalmente uno por módulo afectado), con el contexto, el objetivo y la arquitectura de esa pieza. No edita ficheros del repositorio. También se puede hablar con él directamente con `claude --agent architect`.
 2. **Diseño (`design`, analista programador bajo control del arquitecto).** Se hace en tres pasos dentro de la misma ejecución:
-   1. El analista crea o reutiliza la rama `issue-<n>`, actualiza `specs/` (requisitos y `design.md`), hace commit y publica en el issue un borrador del plan con sus dudas para el arquitecto.
+   1. El analista crea o reutiliza la rama `issue-<n>`, actualiza `specs/` (requisitos, `design.md` y el plan de pruebas `test-plan.md`), hace commit y publica en el issue un borrador del plan con sus dudas para el arquitecto.
    2. El arquitecto revisa el borrador y el diff de `specs/`, argumenta sus observaciones y emite un veredicto: `APROBADO`, `CAMBIOS` o `PREGUNTA`.
-   3. Si no hay pregunta para una persona, el analista aplica la revisión y publica como **último comentario** el plan de acción para el desarrollador: ficheros, contratos, pasos en orden, tests y definición de hecho.
+   3. Si no hay pregunta para una persona, el analista aplica la revisión y publica como **último comentario** el plan de acción para el desarrollador: ficheros, contratos, pasos en orden, tests, plan de pruebas y definición de hecho.
 
    Las piezas de software que define el analista son las rutas y controladores (route handlers o server actions), los servicios, los repositorios de acceso a datos (el "DAO", con Prisma), los esquemas Zod, los componentes, las migraciones y los tests.
-3. **Desarrollo (`develop`, programador).** Trabaja en la rama `issue-<n>` que creó el analista y sigue el último "Plan de acción para el desarrollador". Implementa, escribe los tests, deja el linter, la comprobación de tipos y los tests en verde, sube la rama y, cuando la tarea está lista, abre la pull request con `Closes #<n>`. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
+3. **Desarrollo (`develop`, programador).** Trabaja en la rama `issue-<n>` que creó el analista y sigue el último "Plan de acción para el desarrollador". Implementa, escribe los tests, deja el linter, la comprobación de tipos y los tests en verde, sube la rama y, cuando la tarea está lista, abre la pull request con `Closes #<n>` y cambia la etiqueta del issue de `develop` a `pr-raised`. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
+4. **Pruebas de la PR (`testPR`, etiqueta `pr-raised`, analista programador).** Antes de fusionar, ejecuta sobre la rama de la PR el plan de pruebas `specs/<modulo>/test-plan.md`: preparación, comprobaciones generales y casos `PP-<MOD>-NN`. No corrige nada ni hace commits. Publica el resultado en la conversación de la PR, con `RESULTADO: SUPERADO`, `FALLIDO` o `BLOQUEADO` en la primera línea y las comprobaciones manuales que quedan para la persona que fusiona.
 
 ### Aprobaciones y preguntas
 
 - Cuando un agente necesita una decisión de una persona, deja la pregunta en el issue (numerada y con una propuesta por defecto), añade la etiqueta `needs-info` y se detiene.
 - Al responder con un comentario en el issue, se vuelve a ejecutar la etapa de la etiqueta actual con el hilo completo.
-- Pasar de una etapa a la siguiente es siempre una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto.
+- Pasar de una etapa a la siguiente es una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto. La única excepción es el paso de `develop` a `pr-raised`: lo hace el programador al abrir la PR, y lanza `testPR` automáticamente.
 
 ### Convenciones de GitHub
 
-- Etiquetas de etapa: `analysis`, `design`, `develop`. Etiqueta de estado: `needs-info` (bloqueado por una pregunta). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
+- Etiquetas de etapa: `analysis`, `design`, `develop`, `pr-raised` (etapa `testPR`). Etiqueta de estado: `needs-info` (bloqueado por una pregunta). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
 - Todo issue hijo enlaza a su padre (`Padre: #<n>`) y el padre mantiene una lista de tareas con sus hijos.
 - Rama de trabajo: `issue-<n>`, donde `<n>` es el número del issue en etapa `design` y `develop`. La crea el analista y la usa el programador.
 - Las plantillas de issue y de comentario están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
 - Los issues y comentarios se escriben en el idioma del hilo (español por defecto).
-- Ningún agente fusiona ramas ni aprueba PRs; eso lo decide una persona.
+- Ningún agente fusiona ramas ni aprueba PRs; eso lo decide una persona, después de ver el resultado de `testPR`.
 
 ### Cómo invocar a los agentes
 

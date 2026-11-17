@@ -10,14 +10,15 @@ description: Convenciones para crear y mantener las especificaciones de módulos
 - Un subdirectorio por módulo: `specs/<modulo>/`, nombre en inglés y kebab-case.
 - `README.md` obligatorio (requisitos). Plantilla: `specs/_template/README.md`.
 - `design.md` (diseño técnico). Plantilla: `specs/_template/design.md`.
-- Ambos los escribe el **analista programador** en la rama `issue-<n>` durante la etapa `design`. El **arquitecto** los propone y revisa en el issue, pero no los edita.
+- `test-plan.md` (plan de pruebas que se ejecuta antes de fusionar la PR, en la etapa `testPR`). Plantilla: `specs/_template/test-plan.md`. Ver la skill `test-plan`.
+- Los tres los escribe el **analista programador** en la rama `issue-<n>` durante la etapa `design`. El **arquitecto** los propone y revisa en el issue, pero no los edita.
 - Otros `.md` opcionales: `flows.md`, `data-model.md`, `adr-NNN-<titulo>.md`.
 - Índice general en `specs/README.md`: añade una fila por módulo nuevo y actualiza su estado.
 
 ## Identificadores
 
 - Cada módulo tiene un prefijo de 2 a 4 letras en mayúsculas, registrado en `specs/README.md` (por ejemplo `FSC` para `form-schema`).
-- `RF-<MOD>-NN` funcional, `RNF-<MOD>-NN` no funcional, `CA-<MOD>-NN` criterio de aceptación.
+- `RF-<MOD>-NN` funcional, `RNF-<MOD>-NN` no funcional, `CA-<MOD>-NN` criterio de aceptación, `PP-<MOD>-NN` caso del plan de pruebas (`PP-<MOD>-G<N>` para las comprobaciones generales).
 - Los números nunca se reutilizan ni se renumeran. Un requisito eliminado se deja tachado con el motivo: `~~RF-FSC-07~~ (retirado: sustituido por RF-FSC-12)`.
 
 ## Estados de un módulo
@@ -35,6 +36,6 @@ description: Convenciones para crear y mantener las especificaciones de módulos
 ## Al cambiar una especificación
 
 1. Comprueba qué otros módulos dependen de lo que cambias (`grep -r "<modulo>" specs/`).
-2. Actualiza los criterios de aceptación afectados.
+2. Actualiza los criterios de aceptación afectados y sus casos en `test-plan.md`.
 3. Registra el cambio en el historial y referencia el issue.
 4. Si cambia un contrato entre módulos, avisa en los issues abiertos de los módulos afectados.

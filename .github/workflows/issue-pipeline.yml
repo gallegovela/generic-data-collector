@@ -11,20 +11,28 @@ name: Issue pipeline
 #             and creates one child issue per development piece. Read-only
 #             on the repository; writes only to GitHub issues.
 # design   -> analyst-programmer, supervised by the architect. Creates or
-#             reuses branch issue-<n>, updates specs/, and leaves the
-#             developer's action plan as the LAST comment of the issue:
+#             reuses branch issue-<n>, updates specs/ (requirements, design
+#             and the module's test plan, specs/<module>/test-plan.md), and
+#             leaves the developer's action plan as the LAST comment:
 #               1. analyst drafts specs changes + plan (comment)
 #               2. architect reviews it (comment with a verdict)
 #               3. analyst applies the review and posts the final plan
 #             If a human decision is needed, the question is left in the
 #             issue with the `needs-info` label and the stage stops.
 # develop  -> developer. On branch issue-<n>, implements the final plan,
-#             runs lint/typecheck/tests, pushes and opens the PR.
+#             runs lint/typecheck/tests, pushes and opens the PR. When the
+#             PR is open it swaps the `develop` label for `pr-raised`.
+# testPR   -> analyst-programmer (label `pr-raised`). Runs the module's
+#             test plan on the PR branch before merging and posts the
+#             result in the PR conversation. Never merges.
 #
 # Re-triggers on a human comment too (not just a fresh label), so
 # answering a question in the thread re-runs the *current* label's stage.
 # Comments and labels written by this workflow use GITHUB_TOKEN, which
 # never triggers new workflow runs, so the pipeline cannot loop on itself.
+# For the same reason, the `pr-raised` label set by the developer does not
+# fire a new run: the test-pr job is chained to the develop job instead
+# (it also runs when a human adds `pr-raised` or comments on the issue).
 
 on:
   issues:
@@ -169,12 +177,15 @@ jobs:
           You are in the DESIGN stage, step 1 of 3 (draft). Your job:
           1. Update specs/ with the new changes: requirements in specs/<module>/README.md and technical design in specs/<module>/design.md, following the spec-writing and technical-design skills.
              Keep the change history of each file and cite issue #$ISSUE_NUMBER.
-          2. Commit the specs/ changes on $BRANCH (git add specs/ && git commit -m "docs(<module>): ... (#$ISSUE_NUMBER)"). Do not push. Do not touch anything outside specs/.
-          3. Draft the action plan for the developer: files to create or modify, signatures and contracts, step-by-step order, tests per acceptance criterion and definition of done.
-          4. List any doubt or decision you need approved. Address it to the architect, who reviews your work in the next step.
+          2. Create the module's test plan specs/<module>/test-plan.md from specs/_template/test-plan.md, or update it if it already exists, with test cases PP-<MOD>-NN
+             for every acceptance criterion this issue adds or changes. It will be run in the testPR stage on the PR branch, before merging: every case must be
+             executable by an agent from the command line (exact commands and a checkable expected result); anything only a person can verify goes to "Comprobaciones manuales".
+          3. Commit the specs/ changes on $BRANCH (git add specs/ && git commit -m "docs(<module>): ... (#$ISSUE_NUMBER)"). Do not push. Do not touch anything outside specs/.
+          4. Draft the action plan for the developer: files to create or modify, signatures and contracts, step-by-step order, tests per acceptance criterion and definition of done.
+          5. List any doubt or decision you need approved. Address it to the architect, who reviews your work in the next step.
 
           Your final answer is posted verbatim as a comment on the issue, in the same language as the issue, titled
-          "## Propuesta del analista (pendiente de revisión del arquitecto)", with sections Cambios en specs, Plan de acción (borrador) and Preguntas para el arquitecto.
+          "## Propuesta del analista (pendiente de revisión del arquitecto)", with sections Cambios en specs, Plan de pruebas, Plan de acción (borrador) and Preguntas para el arquitecto.
           EOF
           )
           ALLOWED=(
@@ -208,6 +219,7 @@ jobs:
 
           You are in the DESIGN stage, step 2 of 3: you supervise the analyst. Your job:
           1. Check that the design fits the architecture agreed in the parent issue and in specs/, respects CLAUDE.md (multi-tenant, GDPR, offline, stack, scope of the pilot) and covers every acceptance criterion.
+             Check that specs/<module>/test-plan.md covers every acceptance criterion of the issue and that each case can really be run by an agent before merging.
           2. Point out errors, gaps and improvements, arguing each one, and answer the analyst's questions when you can.
           3. Decide one verdict and write it on the FIRST line of your answer, exactly one of:
              VEREDICTO: APROBADO        -> the analyst can publish the final plan as is
@@ -257,7 +269,8 @@ jobs:
 
           Your final answer is posted verbatim as the LAST comment of the issue, in the same language as the issue, titled
           "## Plan de acción para el desarrollador", with sections Contexto, Rama ($BRANCH), Specs de referencia, Ficheros (table: acción, ruta, contenido),
-          Contratos, Pasos en orden, Tests (one per acceptance criterion), Definición de hecho and Cambios respecto a la revisión del arquitecto.
+          Contratos, Pasos en orden, Tests (one per acceptance criterion), Plan de pruebas (link to specs/<module>/test-plan.md and the PP cases the PR must pass),
+          Definición de hecho and Cambios respecto a la revisión del arquitecto.
           EOF
           )
           ALLOWED=(
@@ -303,6 +316,8 @@ jobs:
     needs: check-permission
     if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'develop') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')))
     runs-on: ionos-l1-claude
+    outputs:
+      pr_raised: ${{ steps.pr.outputs.raised }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -340,6 +355,8 @@ jobs:
              (gh pr list --head $BRANCH): gh pr create --base $DEFAULT_BRANCH --head $BRANCH --title "<conventional title> (#$ISSUE_NUMBER)" --body "..."
              The body summarises the changes, lists the requirements and acceptance criteria covered, the check results, and ends with "Closes #$ISSUE_NUMBER".
              If the task is not ready, do not open the PR and explain why.
+          5. Only once the PR is open, move the issue to the next stage: gh issue edit $ISSUE_NUMBER --remove-label develop --add-label pr-raised
+             (create the label first if it does not exist: gh label create pr-raised --color 5319e7 --description "PR abierta: etapa testPR").
 
           Your final answer is posted verbatim as a comment on the issue, in the same language as the issue: what was done, files touched,
           check results, PR link (or what blocks it).
@@ -359,6 +376,23 @@ jobs:
             git push -u origin "$BRANCH"
           fi
 
+      # Safety net for step 5 of the prompt: if an open PR exists but the
+      # label was not swapped, swap it here. The output chains test-pr.
+      - name: Move the issue to pr-raised
+        id: pr
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "raised=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh label create pr-raised --color 5319e7 --description "PR abierta: etapa testPR" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label pr-raised
+          echo "raised=true" >> "$GITHUB_OUTPUT"
+
       - name: Post result comment
         if: always()
         env:
@@ -366,3 +400,106 @@ jobs:
         run: |
           [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/develop.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/develop.md
+
+  # ---------------------------------------------------------------------
+  # Stage 4: testPR (analyst-programmer), label `pr-raised`
+  # ---------------------------------------------------------------------
+  test-pr:
+    needs: [check-permission, develop]
+    # always() so it is evaluated when develop is skipped (label/comment
+    # triggers) and when develop just raised the PR (chained trigger).
+    if: >-
+      always() && needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'pr-raised') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'pr-raised')) ||
+        needs.develop.outputs.pr_raised == 'true'
+      )
+    runs-on: ionos-l1-claude
+    env:
+      # Isolates the test stack from any other compose project on the
+      # host (the deployed demo included), so `down -v` cannot touch it.
+      COMPOSE_PROJECT_NAME: formia-testpr-${{ github.event.issue.number }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: issue-${{ github.event.issue.number }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Find the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+          if [ -z "$PR" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body "⚠️ Etapa testPR: no hay ninguna pull request abierta desde \`$BRANCH\`. No se ejecuta el plan de pruebas."
+            exit 1
+          fi
+
+      - name: Prepare local environment file
+        run: cp -n .env.example .env || true
+
+      - name: Analyst - run the test plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH, the head of pull request #$PR_NUMBER for issue #$ISSUE_NUMBER.
+          Read the issue and its whole thread (gh issue view $ISSUE_NUMBER --comments), the pull request (gh pr view $PR_NUMBER --comments)
+          and the files it changes (git diff origin/$DEFAULT_BRANCH...HEAD --stat).
+          Find the test plan: the "Plan de pruebas" section of the latest "Plan de acción para el desarrollador" comment points to specs/<module>/test-plan.md.
+
+          You are in the TESTPR stage. Your job is to verify, before merging, that the pull request passes the test plan:
+          1. Run the "Preparación" steps, then every "Comprobaciones generales" check and every PP case that applies to this issue, exactly as written.
+             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          2. For each case record the result: ✅ superado, ❌ fallido (with the relevant part of the output, never secrets or personal data) or ⏭️ no ejecutado (with the reason).
+          3. Do not fix anything: do not edit files, commit, push, approve or merge. If a case fails, report it for the developer.
+             If the test plan is missing, contradictory or cannot be run, report it for the analyst and the architect, add the label
+             (gh issue edit $ISSUE_NUMBER --add-label needs-info) and stop.
+          4. Run the "Limpieza" steps at the end, even if some case failed.
+
+          The FIRST line of your answer must be exactly one of: RESULTADO: SUPERADO | RESULTADO: FALLIDO | RESULTADO: BLOQUEADO
+          Your final answer is posted verbatim in the pull request conversation, in the same language as the issue, titled "## Resultado del plan de pruebas"
+          right after the result line, with sections Resumen, Comprobaciones generales (table), Casos de prueba (table: ID, cubre, resultado, detalle),
+          Comprobaciones manuales pendientes (for the person who merges) and Siguiente paso.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)"
+            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
+            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue edit:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)"
+          )
+          claude -p "$PROMPT" \
+            --agent analyst-programmer \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
+            --output-format text \
+            --max-budget-usd 4 \
+            > /tmp/testpr.md
+
+      - name: Clean up the test stack
+        if: always()
+        run: |
+          if command -v docker >/dev/null 2>&1; then
+            docker compose down -v --remove-orphans || true
+          fi
+
+      - name: Post result in the pull request
+        if: always() && steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          [ -s /tmp/testpr.md ] || echo "⚠️ La etapa testPR ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/testpr.md
+          gh pr comment "$PR_NUMBER" --body-file /tmp/testpr.md
+          RESULT=$(grep -oE 'RESULTADO: (SUPERADO|FALLIDO|BLOQUEADO)' /tmp/testpr.md | head -1 | cut -d' ' -f2)
+          gh issue comment "$ISSUE_NUMBER" --body "Etapa testPR: ${RESULT:-SIN RESULTADO}. Detalle en #$PR_NUMBER."

@@ -37,7 +37,8 @@ Si el proyecto ya tiene otra convención en el código, sigue la del código y d
 5. **Errores**: tabla de errores de dominio → código HTTP → mensaje en español para la interfaz.
 6. **Seguridad**: comprobación de rol, filtro por organización, validación de entrada, URLs firmadas, nada de datos personales en logs.
 7. **Tests**: para cada `CA-<MOD>-NN`, qué test lo cubre y de qué tipo.
-8. **Plan de acción** para el desarrollador: pasos en orden, publicado como último comentario del issue con la plantilla de la skill `github-issues`.
+8. **Plan de pruebas**: crea o actualiza `specs/<modulo>/test-plan.md` con la skill `test-plan`: casos `PP-<MOD>-NN` que un agente pueda ejecutar sobre la rama de la PR antes de fusionarla.
+9. **Plan de acción** para el desarrollador: pasos en orden, publicado como último comentario del issue con la plantilla de la skill `github-issues`.
 
 ## Reglas para ordenar los pasos del plan
 
@@ -51,7 +52,7 @@ Si el proyecto ya tiene otra convención en el código, sigue la del código y d
 ## Calidad del diseño
 
 - [ ] El programador no tiene que decidir nombres, firmas ni estructura.
-- [ ] Cada criterio de aceptación tiene al menos un test asignado.
+- [ ] Cada criterio de aceptación tiene al menos un test asignado y un caso en `test-plan.md`.
 - [ ] Ninguna consulta sin `organizationId`.
 - [ ] Reutiliza `form-schema` y utilidades existentes en lugar de duplicarlas.
 - [ ] Ninguna dependencia nueva sin justificar.

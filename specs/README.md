@@ -4,6 +4,7 @@ Fuente de verdad de los módulos del proyecto. Cada subdirectorio es un módulo 
 
 - `README.md` de cada módulo: requisitos. Los escribe el agente **analyst-programmer** en la etapa `design`, bajo la revisión del **architect**.
 - `design.md` de cada módulo: diseño técnico, también del **analyst-programmer**.
+- `test-plan.md` de cada módulo: plan de pruebas que el **analyst-programmer** escribe en la etapa `design` y ejecuta en la etapa `testPR` (etiqueta `pr-raised`), sobre la rama de la PR, antes de fusionarla.
 - Para crear un módulo: copiar [`_template/`](_template/) y añadirlo a esta tabla.
 
 ## Mapa de módulos

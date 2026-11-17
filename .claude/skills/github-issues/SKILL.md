@@ -1,6 +1,6 @@
 ---
 name: github-issues
-description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador y de la PR, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
+description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop, pr-raised), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador, de la PR y del resultado del plan de pruebas, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
 ---
 
 # Issues y pull requests de GitHub
@@ -17,6 +17,8 @@ gh issue edit <n> --remove-label needs-info
 gh label create "module:<modulo>" --color 0e8a16 --description "<d>"   # si no existe
 gh pr list --head issue-<n>                        # ¿ya hay PR?
 gh pr create --base main --head issue-<n> --title "<t>" --body "<cuerpo>"
+gh issue edit <n> --remove-label develop --add-label pr-raised   # el developer, al abrir la PR
+gh pr view <pr> --comments                         # leer la PR (etapa testPR)
 ```
 
 En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`, sin tuberías, heredocs ni ficheros temporales: los permisos del agente solo admiten el comando directo. La respuesta final del agente la publica el propio workflow como comentario; el agente no tiene que comentar a mano.
@@ -28,17 +30,18 @@ En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`
 | `analysis` | Etapa 1: la procesa el **architect** | Una persona |
 | `design` | Etapa 2: la procesa el **analyst-programmer**, revisado por el architect | Una persona, al aprobar un issue hijo |
 | `develop` | Etapa 3: la procesa el **developer** | Una persona, al aprobar el plan de acción |
+| `pr-raised` | Etapa 4, `testPR`: la procesa el **analyst-programmer**, que ejecuta el plan de pruebas sobre la PR | El **developer**, al abrir la PR (quitando `develop`); o una persona, para repetir las pruebas |
 | `needs-info` | Bloqueado esperando la respuesta de una persona | Cualquier agente |
 | `module:<modulo>` | Módulo de `specs/` afectado | El architect |
 
-Los agentes nunca ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. Responder con un comentario vuelve a ejecutar la etapa de la etiqueta actual.
+Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. La única excepción es el cambio de `develop` a `pr-raised`, que hace el developer al abrir la PR. Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
 
 ## Enlaces
 
 - El cuerpo de un issue hijo empieza con `Padre: #<n>`.
 - El padre mantiene una lista de tareas: `- [ ] #<hijo> <título>`.
 - Dependencias entre hijos: `Depende de: #<n>`.
-- Rama de trabajo de un issue hijo: `issue-<n>`. La crea el analista en la etapa `design` y la usa el programador en `develop`.
+- Rama de trabajo de un issue hijo: `issue-<n>`. La crea el analista en la etapa `design`, la usa el programador en `develop` y el analista la prueba en `testPR`.
 
 ## Plantilla: issue de necesidad (lo abre una persona, etiqueta `analysis`)
 
@@ -90,7 +93,11 @@ Depende de: #<n> | ninguno
 ### Cambios en specs
 - `specs/<modulo>/README.md`: <qué y por qué>
 - `specs/<modulo>/design.md`: <qué y por qué>
+- `specs/<modulo>/test-plan.md`: <casos PP añadidos o cambiados>
 - Commit: <sha> en `issue-<n>`
+
+### Plan de pruebas
+- PP-<MOD>-NN — cubre CA-<MOD>-NN — <qué comprueba>
 
 ### Plan de acción (borrador)
 <mismo formato que el plan final>
@@ -149,11 +156,15 @@ VEREDICTO: APROBADO | CAMBIOS | PREGUNTA
 - [ ] CA-<MOD>-NN — Vitest `<ruta>` — <casos>
 - [ ] CA-<MOD>-NN — Playwright `<ruta>` — <flujo>
 
+### Plan de pruebas
+[`specs/<modulo>/test-plan.md`](...) — la PR tiene que superar PP-<MOD>-G1…G5 y PP-<MOD>-NN, PP-<MOD>-NN en la etapa `testPR`.
+
 ### Definición de hecho
 - [ ] `npm run lint`, `npm run typecheck` y `npm test` en verde
 - [ ] Tests nuevos citando los CA que cubren
 - [ ] Commits en `issue-<n>` con Conventional Commits
 - [ ] PR abierta con `Closes #<n>`
+- [ ] Etiqueta del issue cambiada de `develop` a `pr-raised`
 
 ### Cambios respecto a la revisión del arquitecto
 <qué se ha aplicado o argumentado>
@@ -175,6 +186,32 @@ VEREDICTO: APROBADO | CAMBIOS | PREGUNTA
 <decisiones menores, puntos a mirar>
 
 Closes #<n>
+```
+
+## Plantilla: resultado del plan de pruebas (etapa `testPR`, comentario en la PR)
+
+```markdown
+RESULTADO: SUPERADO | FALLIDO | BLOQUEADO
+## Resultado del plan de pruebas
+
+### Resumen
+<rama, commit probado, plan usado (`specs/<modulo>/test-plan.md`) y conclusión en una o dos frases>
+
+### Comprobaciones generales
+| ID | Comando | Resultado |
+| --- | --- | --- |
+| PP-<MOD>-G1 | `npm run lint` | ✅ |
+
+### Casos de prueba
+| ID | Cubre | Resultado | Detalle |
+| --- | --- | --- | --- |
+| PP-<MOD>-01 | CA-<MOD>-01 | ❌ | <salida relevante o motivo> |
+
+### Comprobaciones manuales pendientes
+- [ ] <comprobación para la persona que fusiona>
+
+### Siguiente paso
+<FALLIDO: qué tiene que corregir el developer · BLOQUEADO: qué falta en el plan · SUPERADO: listo para revisión humana>
 ```
 
 ## Comunicación entre agentes
