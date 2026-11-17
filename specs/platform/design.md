@@ -6,7 +6,7 @@
 
 ## Resumen
 
-Se crea el proyecto Next.js (App Router + TypeScript estricto) con las herramientas oficiales (`create-next-app`, `shadcn init`, `prisma init`), sin modelos de negocio todavía. Se añaden `docker-compose.yml` (PostgreSQL, MinIO, Mailpit) para desarrollo local y `docker-compose.prod.yml` con el contenedor de la aplicación para la demo. La validación de variables de entorno se hace una vez, al arrancar el servidor, con un esquema Zod cargado desde `instrumentation.ts`. Se expone `GET /api/health` para comprobar base de datos y almacenamiento. La CI (`tests.yml`) se reescribe para Node/Next.js; `deploy.yml` se adapta para usar el fichero `docker-compose.prod.yml` pero mantiene el runner propio y la estrategia ya existentes. Cada módulo posterior añade sus propias variables de entorno, dependencias, modelos y migraciones; este módulo no las incluye.
+Se crea el proyecto Next.js (App Router + TypeScript estricto) con las herramientas oficiales (`create-next-app`, `shadcn init`, `prisma init`), sin modelos de negocio todavía. Se añaden `docker-compose.yml` (PostgreSQL, MinIO, Mailpit) para desarrollo local y `docker-compose.prod.yml` con el contenedor de la aplicación para la demo. La validación de variables de entorno se hace una vez, al arrancar el servidor, con un esquema Zod cargado desde `instrumentation.ts`. Se expone `GET /api/health` para comprobar base de datos y almacenamiento. La CI (`tests.yml`) se reescribe para Node/Next.js; `deploy.yml` se adapta para usar el fichero `docker-compose.prod.yml` y para generar `.env` a partir de `.env.example` y del environment `ionosL1` de GitHub, pero mantiene el runner propio y la estrategia ya existentes (ver [Despliegue](#despliegue)). Cada módulo posterior añade sus propias variables de entorno, dependencias, modelos y migraciones; este módulo no las incluye.
 
 ## Modelo de datos
 
@@ -144,7 +144,45 @@ sequenceDiagram
 - `/api/health` no requiere rol ni filtra por organización: no expone datos de negocio, solo un estado `ok`/`error` por dependencia.
 - Ninguna variable de entorno ni su valor se registra en logs; `loadEnv` solo informa del **nombre** del campo inválido, nunca de su valor.
 - `.env.example` no contiene secretos reales (placeholders tipo `changeme`).
+- En producción, las credenciales de PostgreSQL y MinIO no son las de desarrollo: salen de los secrets del environment `ionosL1` (ver [Despliegue](#despliegue)). El `.env` generado en el servidor tiene permisos `600` y el paso que lo crea solo registra en el log los **nombres** de las variables sustituidas, nunca sus valores.
 - Sin datos personales en este módulo: no hay entidades de negocio todavía.
+
+## Despliegue
+
+El despliegue lo hace `.github/workflows/deploy.yml` en el runner propio `ionos-l1-docker`, sobre un checkout persistente en `SOURCE_PATH`. El job declara `environment: ionosL1` para tener acceso a los secrets y variables de ese environment.
+
+### Generación de `.env`
+
+GitHub Actions no inyecta los secrets ni las variables como variables de entorno de los pasos: hay que referenciarlos. El paso "Generate .env from .env.example" (`actions/github-script`) recibe todos de una vez como JSON (`toJSON(secrets)` y `toJSON(vars)`) y:
+
+1. Lee `.env.example` del checkout línea a línea.
+2. Conserva comentarios y líneas en blanco tal cual.
+3. Para cada línea `CLAVE=valor`, si `CLAVE` existe como secret se usa su valor; si no, como variable; si no existe en ninguno, se deja el valor de `.env.example`.
+4. Escribe el resultado en `SOURCE_PATH/.env` con permisos `600`. Un valor con saltos de línea hace fallar el paso.
+
+Decisiones:
+
+- `.env.example` se **copia**, no se renombra: es un fichero versionado y, si se moviera, el siguiente `git pull` del checkout persistente fallaría o dejaría de encontrarlo.
+- La lista de variables la define `.env.example`: un módulo que añade una variable nueva solo tiene que añadirla allí y crear el secret o la variable con el mismo nombre en `ionosL1`; `deploy.yml` no cambia.
+- Los valores se escriben sin comillas (`CLAVE=valor`). Docker Compose interpola `$` en `.env`, así que los secrets no deben contener `$`.
+
+Secrets obligatorios en `ionosL1`: `S3_ACCESS_KEY`, `S3_SECRET_KEY` (mínimo 8 caracteres, lo exige MinIO) y `POSTGRES_PASSWORD` (solo letras, números, `-` y `_`, porque va dentro de `DATABASE_URL`). Opcionales: `POSTGRES_USER`, `POSTGRES_DB`, `S3_BUCKET`, `S3_REGION`. `SOURCE_PATH` sigue siendo un secret propio del workflow.
+
+### `docker-compose.prod.yml`
+
+Se combina con `docker-compose.yml` (`-f docker-compose.yml -f docker-compose.prod.yml`) y Docker Compose lee el mismo `.env` para interpolar `${...}`, de modo que la app y cada servicio comparten credenciales:
+
+| Servicio | Variables | Origen |
+| --- | --- | --- |
+| `app` | `NODE_ENV=production`, `S3_ENDPOINT=http://minio:9000`, `S3_FORCE_PATH_STYLE=true`, `DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}` | Fijadas en el fichero; pisan las de `.env` para que la app use siempre los nombres de servicio de la red interna de Docker, nunca `localhost`. El resto (`S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, `S3_REGION`) llega por `env_file: .env`. |
+| `minio` | `MINIO_ROOT_USER=${S3_ACCESS_KEY}`, `MINIO_ROOT_PASSWORD=${S3_SECRET_KEY}` | `.env` |
+| `postgres` | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` (por defecto `formia` salvo la contraseña); el healthcheck usa `$POSTGRES_USER` | `.env` |
+
+- Solo `app` publica puerto (3000); PostgreSQL, MinIO y Mailpit quedan en la red interna (`ports: []`).
+- `S3_ACCESS_KEY`, `S3_SECRET_KEY` y `POSTGRES_PASSWORD` usan `${VAR:?mensaje}`: si faltan, `docker-compose` falla antes de arrancar con un mensaje claro.
+- PostgreSQL y MinIO solo aplican estas credenciales al inicializar un volumen vacío. Si `postgres-data` o `minio-data` ya existen con otras credenciales, hay que cambiarlas a mano o recrear el volumen (con pérdida de datos).
+- El bucket `S3_BUCKET` no lo crea este módulo; lo hará el módulo que empiece a guardar archivos.
+- Pendiente para ese módulo: las URLs firmadas de fotos y firmas las abre el navegador, que no puede llegar a `http://minio:9000`. Hará falta un endpoint público con HTTPS (proxy inverso hacia MinIO) y probablemente una variable aparte para él.
 
 ## Tests
 
@@ -166,7 +204,7 @@ sequenceDiagram
 | 4 | #3 | `src/server/db/client.ts`, `prisma/schema.prisma` (sin modelos), `prisma/seed.ts` placeholder | 1, 3 |
 | 5 | #3 | `src/server/platform/health.service.ts` + test, `src/app/api/health/route.ts` + test | 2, 4 |
 | 6 | #3 | `src/app/layout.tsx`, `src/app/page.tsx` (placeholder) | 1 |
-| 7 | #3 | `Dockerfile`, `.dockerignore`, `docker-compose.prod.yml`, adaptar `deploy.yml` | 3 |
+| 7 | #3 | `Dockerfile`, `.dockerignore`, `docker-compose.prod.yml` (credenciales desde `.env`), adaptar `deploy.yml` (environment `ionosL1` y generación de `.env`) | 3 |
 | 8 | #3 | Reescribir `tests.yml`; `playwright.config.ts`, `vitest.config.ts`, `e2e/platform-smoke.spec.ts` | 2, 4, 5, 6 |
 | 9 | #3 | `README.md` raíz con la guía de arranque (RNF-PLT-04) | 1-8 |
 
@@ -174,3 +212,4 @@ sequenceDiagram
 
 - 2026-11-14 — Diseño técnico inicial (#3): estructura del proyecto, validación de entorno, endpoint de salud, docker-compose de desarrollo y producción, y adaptación de la CI existente.
 - 2026-11-15 — Correcciones del arquitecto (#3): separada la responsabilidad de `package.json` (`postinstall` y `"prisma": { "seed": ... }`) de `prisma.config.ts` (no se necesita en este módulo) en la sección "Modelo de datos", para que quede claro qué va en cada fichero.
+- 2026-11-17 — Despliegue (#3): `deploy.yml` genera `.env` a partir de `.env.example` y de los secrets y variables del environment `ionosL1`; `docker-compose.prod.yml` toma de `.env` las credenciales de PostgreSQL y MinIO y fija los endpoints internos de la app; nuevas variables `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_DB` en `.env.example`. Nueva sección "Despliegue".
