@@ -1,6 +1,6 @@
 ---
 name: github-issues
-description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop, pr-raised), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador, de la PR y del resultado del plan de pruebas, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
+description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop, pr-raised, merge) y de estado (needs-info, human-review), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador, de la PR, del resultado del plan de pruebas y de la etapa merge, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
 ---
 
 # Issues y pull requests de GitHub
@@ -18,7 +18,9 @@ gh label create "module:<modulo>" --color 0e8a16 --description "<d>"   # si no e
 gh pr list --head issue-<n>                        # ¿ya hay PR?
 gh pr create --base main --head issue-<n> --title "<t>" --body "<cuerpo>"
 gh issue edit <n> --remove-label develop --add-label pr-raised   # el developer, al abrir la PR
-gh pr view <pr> --comments                         # leer la PR (etapa testPR)
+gh pr view <pr> --comments                         # leer la PR (etapas testPR y merge)
+gh pr view <pr> --json mergeable,mergeStateStatus   # ¿se puede fusionar? (etapa merge)
+gh pr merge <pr> --merge                           # solo el architect, en la etapa merge
 ```
 
 En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`, sin tuberías, heredocs ni ficheros temporales: los permisos del agente solo admiten el comando directo. La respuesta final del agente la publica el propio workflow como comentario; el agente no tiene que comentar a mano.
@@ -31,10 +33,12 @@ En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`
 | `design` | Etapa 2: la procesa el **analyst-programmer**, revisado por el architect | Una persona, al aprobar un issue hijo |
 | `develop` | Etapa 3: la procesa el **developer** | Una persona, al aprobar el plan de acción |
 | `pr-raised` | Etapa 4, `testPR`: la procesa el **analyst-programmer**, que ejecuta el plan de pruebas sobre la PR | El **developer**, al abrir la PR (quitando `develop`); o una persona, para repetir las pruebas |
+| `merge` | Etapa 5: la procesa el **architect**, que fusiona las PRs del módulo cuando todos sus issues en curso están en `merge` | El workflow, cuando `testPR` da `SUPERADO`; o una persona, para dar una PR por buena |
 | `needs-info` | Bloqueado esperando la respuesta de una persona | Cualquier agente |
+| `human-review` | Pruebas no superadas (`FALLIDO`, `BLOQUEADO`) o PR que no se puede fusionar. Bloquea la etapa `merge` de todo el módulo | El workflow (tras `testPR`) o el architect (en `merge`); la quita una persona |
 | `module:<modulo>` | Módulo de `specs/` afectado | El architect |
 
-Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. La única excepción es el cambio de `develop` a `pr-raised`, que hace el developer al abrir la PR. Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
+Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. Las excepciones: de `develop` a `pr-raised` (el developer, al abrir la PR), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de `testPR`) y de `merge` a `human-review` (el architect, si una PR no se puede fusionar). Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
 
 ## Enlaces
 
@@ -211,7 +215,28 @@ RESULTADO: SUPERADO | FALLIDO | BLOQUEADO
 - [ ] <comprobación para la persona que fusiona>
 
 ### Siguiente paso
-<FALLIDO: qué tiene que corregir el developer · BLOQUEADO: qué falta en el plan · SUPERADO: listo para revisión humana>
+<FALLIDO: qué tiene que corregir el developer · BLOQUEADO: qué falta en el plan · SUPERADO: listo para la etapa merge>
+```
+
+## Plantilla: etapa merge (architect, comentario en el issue)
+
+```markdown
+FUSIÓN: COMPLETA | PARCIAL | NINGUNA
+## Etapa merge
+
+### Revisión
+| Issue | PR | Pruebas | CI | Se puede fusionar | Veredicto |
+| --- | --- | --- | --- | --- | --- |
+| #<n> | #<pr> | ✅ SUPERADO | ✅ | ✅ | fusionar |
+
+### Orden de fusión
+1. #<pr> (#<n>) — <motivo: dependencia>
+
+### Resultado
+<qué PRs se han fusionado; si alguna no, por qué y qué issue pasa a `human-review`>
+
+### Siguiente paso
+<despliegue lanzado por el workflow · qué tiene que revisar una persona>
 ```
 
 ## Comunicación entre agentes

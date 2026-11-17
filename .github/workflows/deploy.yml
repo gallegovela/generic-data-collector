@@ -11,6 +11,9 @@ name: Deploy
 on:
   push:
     branches: [main]
+  # Merges made by the issue pipeline's merge stage use GITHUB_TOKEN and
+  # do not fire `push`; that stage dispatches this workflow instead.
+  workflow_dispatch:
 
 permissions:
   contents: read

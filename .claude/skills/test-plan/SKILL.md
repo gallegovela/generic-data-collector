@@ -34,5 +34,7 @@ Otras restricciones del runner:
 4. Resultado global:
    - `SUPERADO`: todas las comprobaciones generales y todos los casos del issue superados.
    - `FALLIDO`: al menos uno falla por el código de la PR. Explica el fallo para el programador.
-   - `BLOQUEADO`: el plan falta, es contradictorio o no se puede ejecutar en el runner. Explícalo para el analista y el arquitecto y añade `needs-info`.
+   - `BLOQUEADO`: el plan falta, es contradictorio o no se puede ejecutar en el runner. Explícalo para el analista y el arquitecto.
+
+   No cambies etiquetas: el workflow pone `merge` si el resultado es `SUPERADO` y `human-review` en cualquier otro caso. Un issue en `human-review` bloquea la fusión de todo su módulo hasta que una persona lo revise.
 5. Publica el informe con la plantilla "resultado del plan de pruebas" de la skill `github-issues`. El workflow lo pone en la conversación de la PR.
