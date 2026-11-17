@@ -1,6 +1,6 @@
 ---
 name: github-issues
-description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop, pr-raised, merge) y de estado (needs-info, human-review), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador, de la PR, del resultado del plan de pruebas y de la etapa merge, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
+description: Cómo leer, crear, enlazar y comentar issues y pull requests de GitHub en FormIA con la CLI gh - etiquetas de etapa (analysis, design, develop, pr-raised, merge, module-test), de estado (needs-info, human-review, module-test-done) y de tipo (integration), plantillas del issue de diseño, del borrador y la revisión, del plan de acción para el desarrollador, de la PR, del resultado del plan de pruebas, de la etapa merge, del issue de prueba global y de su resultado, y reglas de comunicación entre agentes. Úsala siempre que leas o escribas en un issue o PR.
 ---
 
 # Issues y pull requests de GitHub
@@ -20,6 +20,7 @@ gh pr create --base main --head issue-<n> --title "<t>" --body "<cuerpo>"
 gh issue edit <n> --remove-label develop --add-label pr-raised   # el developer, al abrir la PR
 gh pr view <pr> --comments                         # leer la PR (etapas testPR y merge)
 gh pr view <pr> --json mergeable,mergeStateStatus   # ¿se puede fusionar? (etapa merge)
+gh pr review <pr> --approve --body "<motivo>"       # solo el architect, en la etapa merge
 gh pr merge <pr> --merge                           # solo el architect, en la etapa merge
 ```
 
@@ -33,12 +34,15 @@ En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`
 | `design` | Etapa 2: la procesa el **analyst-programmer**, revisado por el architect | Una persona, al aprobar un issue hijo |
 | `develop` | Etapa 3: la procesa el **developer** | Una persona, al aprobar el plan de acción |
 | `pr-raised` | Etapa 4, `testPR`: la procesa el **analyst-programmer**, que ejecuta el plan de pruebas sobre la PR | El **developer**, al abrir la PR (quitando `develop`); o una persona, para repetir las pruebas |
-| `merge` | Etapa 5: la procesa el **architect**, que fusiona las PRs del módulo cuando todos sus issues en curso están en `merge` | El workflow, cuando `testPR` da `SUPERADO`; o una persona, para dar una PR por buena |
+| `merge` | Etapa 5: la procesa el **architect** cuando **todos** los issues abiertos del módulo están listos: pide una prueba global o aprueba y fusiona todas sus PRs en un solo paso | El workflow, cuando `testPR` da `SUPERADO`; o una persona, para dar una PR por buena |
+| `module-test` | Etapa 6, en un issue `integration`: la procesa el **analyst-programmer**, que prueba juntas todas las PRs del módulo | El workflow, cuando el architect pide una prueba global; o una persona, para repetirla |
+| `module-test-done` | Prueba global terminada; el architect la analiza en la etapa `merge` | El workflow |
+| `integration` | Tipo de issue: prueba global de un módulo. Su PR lleva el plan global a la rama principal y se fusiona la última | El architect, al crearlo |
 | `needs-info` | Bloqueado esperando la respuesta de una persona | Cualquier agente |
-| `human-review` | Pruebas no superadas (`FALLIDO`, `BLOQUEADO`) o PR que no se puede fusionar. Bloquea la etapa `merge` de todo el módulo | El workflow (tras `testPR`) o el architect (en `merge`); la quita una persona |
+| `human-review` | Pruebas no superadas (`FALLIDO`, `BLOQUEADO`), PR que no se puede fusionar o culpable de una prueba global fallida. Bloquea la etapa `merge` de todo el módulo | El workflow (tras `testPR`) o el architect (en `merge`); la quita una persona |
 | `module:<modulo>` | Módulo de `specs/` afectado | El architect |
 
-Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. Las excepciones: de `develop` a `pr-raised` (el developer, al abrir la PR), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de `testPR`) y de `merge` a `human-review` (el architect, si una PR no se puede fusionar). Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
+Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. Las excepciones: de `develop` a `pr-raised` (el developer, al abrir la PR), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de `testPR`) de `merge` a `human-review` (el architect), y el ciclo de la prueba global (`integration` lo crea el architect; `module-test` y `module-test-done` los pone el workflow). Un módulo bloquea su fusión mientras tenga algún issue abierto que no esté listo, **incluidos los que aún no han empezado**. Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
 
 ## Enlaces
 
@@ -221,13 +225,17 @@ RESULTADO: SUPERADO | FALLIDO | BLOQUEADO
 ## Plantilla: etapa merge (architect, comentario en el issue)
 
 ```markdown
-FUSIÓN: COMPLETA | PARCIAL | NINGUNA
+FUSIÓN: COMPLETA | PARCIAL | NINGUNA | PRUEBA-GLOBAL
 ## Etapa merge
+
+### Camino elegido
+<A prueba global · B prueba global fallida · C fusión> — <por qué, con la visión de todo el módulo>
+PRUEBA-GLOBAL: #<m>   ← solo en el camino A; el workflow lanza module-test con este issue
 
 ### Revisión
 | Issue | PR | Pruebas | CI | Se puede fusionar | Veredicto |
 | --- | --- | --- | --- | --- | --- |
-| #<n> | #<pr> | ✅ SUPERADO | ✅ | ✅ | fusionar |
+| #<n> | #<pr> | ✅ SUPERADO | ✅ | ✅ | aprobar y fusionar |
 
 ### Orden de fusión
 1. #<pr> (#<n>) — <motivo: dependencia>
@@ -236,7 +244,48 @@ FUSIÓN: COMPLETA | PARCIAL | NINGUNA
 <qué PRs se han fusionado; si alguna no, por qué y qué issue pasa a `human-review`>
 
 ### Siguiente paso
-<despliegue lanzado por el workflow · qué tiene que revisar una persona>
+<despliegue lanzado por el workflow · prueba global en curso · qué tiene que revisar una persona>
+```
+
+## Plantilla: issue de prueba global (lo crea el architect en la etapa merge)
+
+Etiquetas: `integration` y `module:<modulo>`. El workflow añade `module-test`.
+
+```markdown
+Módulo: [`<modulo>`](specs/<modulo>/README.md)
+Issues del módulo: #<n>, #<n>
+PRs a probar juntas: #<pr>, #<pr>
+
+## Por qué hace falta
+<qué está "en el aire" entre las piezas: contratos, migraciones, ficheros o flujos compartidos>
+
+## Qué hay que probar
+1. <escenario que cruza varias PRs> — Resultado esperado: <comprobable>
+
+## Fuera de alcance
+<lo que ya cubren los planes de cada PR>
+```
+
+## Plantilla: resultado de la prueba global del módulo (module-test, comentario en el issue integration)
+
+```markdown
+RESULTADO: SUPERADO | FALLIDO | BLOQUEADO
+## Resultado de la prueba global del módulo
+
+### Resumen
+<rama `issue-<m>` (rama principal + PRs #…), commit probado, sección "Pruebas globales del módulo" de `specs/<modulo>/test-plan.md`>
+
+### Comprobaciones generales
+| ID | Comando | Resultado |
+| --- | --- | --- |
+
+### Casos globales
+| ID | Escenario | Resultado | Detalle |
+| --- | --- | --- | --- |
+| PP-<MOD>-M1 | <escenario> | ❌ | <salida relevante> |
+
+### Causa probable (para el arquitecto)
+<qué PR o issue provoca cada fallo>
 ```
 
 ## Comunicación entre agentes

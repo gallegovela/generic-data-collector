@@ -45,6 +45,20 @@ Uno o más por cada criterio de aceptación. Los identificadores `PP-<MOD>-NN` n
   ```
 - **Resultado esperado:** <código de salida, salida, código HTTP o cuerpo JSON concretos>
 
+## Pruebas globales del módulo
+
+Solo existe si el arquitecto pide una prueba global en la etapa `merge`. La escribe y la ejecuta el analista en la etapa `module-test`, sobre la rama de integración (rama principal + todas las PRs abiertas del módulo). Cada caso prueba un escenario que cruza varias PRs.
+
+### PP-<MOD>-M1 — <escenario>
+
+- **Pide:** #<issue integration>
+- **PRs implicadas:** #<pr>, #<pr>
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/<modulo>-global.spec.ts
+  ```
+- **Resultado esperado:** <comprobable>
+
 ## Comprobaciones manuales
 
 Solo lo que un agente no puede verificar. La persona que fusiona la PR las revisa.

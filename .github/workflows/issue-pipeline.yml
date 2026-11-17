@@ -27,31 +27,58 @@ name: Issue pipeline
 #             result in the PR conversation. Never merges. The workflow then
 #             swaps `pr-raised` for `merge` (passed) or `human-review`
 #             (failed, blocked or no result).
-# merge    -> architect (label `merge`). Gathers every in-progress issue of
-#             the same module(s) (labels `module:<x>`). If any is not ready
-#             yet (`human-review`, or still in design/develop/testPR), it
-#             waits and does nothing. When all of them carry `merge`, the
-#             architect reviews and merges their PRs in dependency order,
-#             and the workflow dispatches deploy.yml.
+# merge    -> architect (label `merge`). Gathers EVERY open issue of the
+#             same module(s) (labels `module:<x>`, except `analysis`
+#             parents). The module is merged in one single step, so any
+#             issue that is not ready blocks it: not started yet, still in
+#             design/develop/testPR, `human-review`, or without an open PR.
+#             When all are ready, the architect either
+#               - asks for a global module test (creates or reuses an
+#                 `integration` issue, which goes to `module-test`), or
+#               - approves and merges every PR in dependency order; the
+#                 workflow then deploys.
+# module-test -> analyst-programmer (label `module-test`, on an
+#             `integration` issue). The workflow builds branch issue-<m>
+#             from main plus every PR branch of the module; the analyst
+#             writes or updates the global section of the module's test
+#             plan, runs it there and reports in the issue. The workflow
+#             opens the integration PR, sets `module-test-done` and hands
+#             back to the merge stage, where the architect analyses it.
 #
 # Re-triggers on a human comment too (not just a fresh label), so
 # answering a question in the thread re-runs the *current* label's stage.
 # Comments and labels written by this workflow use GITHUB_TOKEN, which
 # never triggers new workflow runs, so the pipeline cannot loop on itself.
-# For the same reason, labels set inside a run do not fire a new run:
-# test-pr is chained to develop and merge is chained to test-pr (each also
-# runs when a human adds its label or comments on the issue), and a merge
-# made with GITHUB_TOKEN does not fire the `push` trigger of deploy.yml,
-# so the merge job dispatches it explicitly (workflow_dispatch is allowed).
+# For the same reason, when a stage hands over to the next one it
+# dispatches this same workflow (workflow_dispatch, inputs `issue` and
+# `stage`), which GITHUB_TOKEN is allowed to do. The same inputs let a
+# person re-run a stage by hand from the Actions tab.
+#
+# The merge stage approves and merges with secrets.ARCHITECT_GH_TOKEN
+# when it exists (a token of an account other than the one that opened
+# the PRs: GitHub does not let the PR author approve it). A merge made
+# with that token fires `push` and deploys by itself; a merge made with
+# GITHUB_TOKEN does not, so the stage dispatches deploy.yml instead.
 
 on:
   issues:
     types: [labeled]
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: Número del issue
+        required: true
+        type: string
+      stage:
+        description: Etapa a ejecutar
+        required: true
+        type: choice
+        options: [test-pr, merge, module-test]
 
 permissions:
-  actions: write        # merge job: gh workflow run deploy.yml
+  actions: write        # gh workflow run: hand-overs between stages and deploy.yml
   contents: write
   issues: write
   pull-requests: write
@@ -59,13 +86,14 @@ permissions:
 # One run at a time per issue; queue instead of cancelling so that a
 # comment posted mid-run is not lost.
 concurrency:
-  group: issue-pipeline-${{ github.event.issue.number }}
+  group: issue-pipeline-${{ github.event.issue.number || inputs.issue }}
   cancel-in-progress: false
 
 env:
   CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-  ISSUE_NUMBER: ${{ github.event.issue.number }}
-  BRANCH: issue-${{ github.event.issue.number }}
+  ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue }}
+  BRANCH: issue-${{ github.event.issue.number || inputs.issue }}
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
   check-permission:
@@ -82,6 +110,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Only accounts with write access can dispatch a workflow, and
+          # the hand-overs between stages come from this workflow itself.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "allowed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           perm=$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${{ github.actor }}/permission" --jq .permission)
           if [ "$perm" = "admin" ] || [ "$perm" = "write" ]; then
             echo "allowed=true" >> "$GITHUB_OUTPUT"
@@ -327,12 +361,10 @@ jobs:
     needs: check-permission
     if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'develop') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')))
     runs-on: ionos-l1-claude
-    outputs:
-      pr_raised: ${{ steps.pr.outputs.raised }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: issue-${{ github.event.issue.number }}
+          ref: ${{ env.BRANCH }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -388,21 +420,17 @@ jobs:
           fi
 
       # Safety net for step 5 of the prompt: if an open PR exists but the
-      # label was not swapped, swap it here. The output chains test-pr.
+      # label was not swapped, swap it here. Then hand over to testPR.
       - name: Move the issue to pr-raised
-        id: pr
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          if [ -z "$PR" ]; then
-            echo "raised=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          [ -n "$PR" ] || exit 0
           gh label create pr-raised --color 5319e7 --description "PR abierta: etapa testPR" 2>/dev/null || true
           gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label pr-raised
-          echo "raised=true" >> "$GITHUB_OUTPUT"
+          gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=test-pr
 
       - name: Post result comment
         if: always()
@@ -416,26 +444,22 @@ jobs:
   # Stage 4: testPR (analyst-programmer), label `pr-raised`
   # ---------------------------------------------------------------------
   test-pr:
-    needs: [check-permission, develop]
-    # always() so it is evaluated when develop is skipped (label/comment
-    # triggers) and when develop just raised the PR (chained trigger).
+    needs: check-permission
     if: >-
-      always() && needs.check-permission.outputs.allowed == 'true' && (
+      needs.check-permission.outputs.allowed == 'true' && (
         (github.event_name == 'issues' && github.event.label.name == 'pr-raised') ||
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'pr-raised')) ||
-        needs.develop.outputs.pr_raised == 'true'
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'test-pr')
       )
     runs-on: ionos-l1-claude
-    outputs:
-      result: ${{ steps.result.outputs.result }}
     env:
       # Isolates the test stack from any other compose project on the
       # host (the deployed demo included), so `down -v` cannot touch it.
-      COMPOSE_PROJECT_NAME: formia-testpr-${{ github.event.issue.number }}
+      COMPOSE_PROJECT_NAME: formia-testpr-${{ github.event.issue.number || inputs.issue }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: issue-${{ github.event.issue.number }}
+          ref: ${{ env.BRANCH }}
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -461,7 +485,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           PROMPT=$(cat <<EOF
           Read CLAUDE.md in full. You are on branch $BRANCH, the head of pull request #$PR_NUMBER for issue #$ISSUE_NUMBER.
@@ -509,7 +532,6 @@ jobs:
       # Only SUPERADO moves the issue to `merge`. Anything else (FALLIDO,
       # BLOQUEADO, a crash with no result line) goes to `human-review`.
       - name: Post result and set the next label
-        id: result
         if: always() && steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
@@ -519,32 +541,33 @@ jobs:
           gh pr comment "$PR_NUMBER" --body-file /tmp/testpr.md
           RESULT=$(grep -oE 'RESULTADO: (SUPERADO|FALLIDO|BLOQUEADO)' /tmp/testpr.md | head -1 | cut -d' ' -f2)
           RESULT=${RESULT:-SIN_RESULTADO}
-          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
 
           gh label create merge --color 0e8a16 --description "Plan de pruebas superado: etapa merge" 2>/dev/null || true
           gh label create human-review --color d93f0b --description "Necesita revisión de una persona" 2>/dev/null || true
           if [ "$RESULT" = "SUPERADO" ]; then
             gh issue edit "$ISSUE_NUMBER" --remove-label pr-raised --remove-label human-review --add-label merge
             gh issue comment "$ISSUE_NUMBER" --body "Etapa testPR: SUPERADO. Detalle en #$PR_NUMBER. El issue pasa a \`merge\`."
+            gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=merge
           else
             gh issue edit "$ISSUE_NUMBER" --remove-label pr-raised --add-label human-review
             gh issue comment "$ISSUE_NUMBER" --body "Etapa testPR: $RESULT. Detalle en #$PR_NUMBER. El issue pasa a \`human-review\`: una persona tiene que revisarlo. Para repetir las pruebas, pon de nuevo \`pr-raised\`."
           fi
 
+
   # ---------------------------------------------------------------------
   # Stage 5: merge (architect), label `merge`
   # ---------------------------------------------------------------------
   merge:
-    needs: [check-permission, test-pr]
+    needs: check-permission
     if: >-
-      always() && needs.check-permission.outputs.allowed == 'true' && (
+      needs.check-permission.outputs.allowed == 'true' && (
         (github.event_name == 'issues' && github.event.label.name == 'merge') ||
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'merge')) ||
-        needs.test-pr.outputs.result == 'SUPERADO'
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'merge')
       )
     runs-on: ionos-l1-claude
     # One merge stage at a time across ALL issues: two issues of the same
-    # module turning `merge` together must not merge the same PRs twice.
+    # module reaching `merge` together must not merge the same PRs twice.
     concurrency:
       group: issue-pipeline-merge
       cancel-in-progress: false
@@ -553,55 +576,79 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Deterministic gate, no agent involved. The group is every OPEN issue
-      # that shares a `module:<x>` label with this one. Within the group:
-      #   - `merge` with an open PR from issue-<n>  -> ready
-      #   - `merge` without an open PR              -> blocking
-      #   - `human-review`                          -> blocking (failed)
-      #   - design / develop / pr-raised / needs-info -> blocking (in progress)
-      #   - no stage label (not started yet, or the `analysis` parent) -> ignored
+      # Deterministic gate, no agent involved. A module is merged in one
+      # single step, so EVERY open issue sharing a `module:<x>` label with
+      # this one must be ready (only `analysis` parents are left out):
+      #   normal issue:      `merge` + open PR from issue-<n>     -> ready
+      #                      anything else (not started, design, develop,
+      #                      pr-raised, needs-info, human-review,
+      #                      `merge` without PR)                  -> blocking
+      #   `integration` one: `module-test-done`                   -> ready, the
+      #                      architect reads its result
+      #                      anything else                         -> blocking
       - name: Check that every issue of the module is ready
         id: gate
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
-            const issueNumber = context.payload.issue.number;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
             const labelsOf = (i) => i.labels.map((l) => (typeof l === "string" ? l : l.name));
+            const openPr = async (n) => (await github.rest.pulls.list({ owner, repo, state: "open", head: `${owner}:issue-${n}` })).data[0];
 
             const self = (await github.rest.issues.get({ owner, repo, issue_number: issueNumber })).data;
             const modules = labelsOf(self).filter((l) => l.startsWith("module:"));
-
             const group = new Map([[self.number, self]]);
             for (const label of modules) {
               const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: "open", labels: label, per_page: 100 });
               for (const i of issues) if (!i.pull_request) group.set(i.number, i);
             }
 
-            const inProgress = ["design", "develop", "pr-raised", "needs-info"];
-            const ready = [], blocking = [], ignored = [];
+            const ready = [], blocking = [], integration = [];
             for (const i of [...group.values()].sort((a, b) => a.number - b.number)) {
               const labels = labelsOf(i);
-              const prs = await github.rest.pulls.list({ owner, repo, state: "open", head: `${owner}:issue-${i.number}` });
-              const pr = prs.data[0];
+              if (labels.includes("analysis")) continue;
               const line = `#${i.number} ${i.title}`;
-              if (labels.includes("human-review")) blocking.push(`${line} — \`human-review\` (pruebas no superadas)`);
-              else if (labels.includes("merge") && pr) ready.push({ issue: i.number, pr: pr.number, title: i.title });
-              else if (labels.includes("merge")) blocking.push(`${line} — \`merge\` pero sin PR abierta desde \`issue-${i.number}\``);
-              else if (labels.some((l) => inProgress.includes(l))) blocking.push(`${line} — en curso (\`${labels.filter((l) => inProgress.includes(l)).join("`, `")}\`)`);
-              else ignored.push(line);
+              const stage = labels.filter((l) => !l.startsWith("module:") && l !== "integration");
+              const pr = await openPr(i.number);
+              if (labels.includes("integration")) {
+                if (labels.includes("module-test-done")) integration.push({ issue: i.number, pr: pr ? pr.number : null, title: i.title });
+                else blocking.push(`${line} — prueba global del módulo sin terminar (\`${stage.join("`, `") || "sin etiqueta"}\`)`);
+              } else if (labels.includes("merge") && !labels.includes("human-review") && pr) {
+                ready.push({ issue: i.number, pr: pr.number, head: pr.head.sha, title: i.title });
+              } else if (labels.includes("merge") && !pr) {
+                blocking.push(`${line} — \`merge\` pero sin PR abierta desde \`issue-${i.number}\``);
+              } else {
+                blocking.push(`${line} — ${stage.length ? `\`${stage.join("`, `")}\`` : "sin empezar"}`);
+              }
+            }
+
+            // Is the global test still valid? Only if its branch contains the
+            // current head commit of every PR of the module.
+            for (const t of integration) {
+              const stale = [];
+              for (const r of ready) {
+                try {
+                  const cmp = await github.rest.repos.compareCommits({ owner, repo, base: r.head, head: `issue-${t.issue}` });
+                  if (!["ahead", "identical"].includes(cmp.data.status)) stale.push(r.pr);
+                } catch { stale.push(r.pr); }
+              }
+              t.stale_prs = stale;
             }
 
             const list = (xs) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- (ninguno)");
             const summary = [
               `Módulos: ${modules.length ? modules.map((m) => `\`${m}\``).join(", ") : "(el issue no tiene etiqueta \`module:<x>\`; solo se considera él mismo)"}`,
               "", "**Listos (`merge` con PR abierta):**", list(ready.map((r) => `#${r.issue} ${r.title} → PR #${r.pr}`)),
-              "", "**Pendientes:**", list(blocking),
-              "", "**Sin empezar (no bloquean):**", list(ignored),
+              "", "**Prueba global del módulo (`integration`):**",
+              list(integration.map((t) => `#${t.issue} ${t.title} → ${t.pr ? `PR #${t.pr}` : "sin PR"}${t.stale_prs.length ? ` — desactualizada respecto a ${t.stale_prs.map((n) => `#${n}`).join(", ")}` : " — al día"}`)),
+              "", "**Pendientes (bloquean la fusión del módulo):**", list(blocking),
             ].join("\n");
 
             core.setOutput("ready", blocking.length === 0 && ready.length > 0 ? "true" : "false");
+            core.setOutput("modules", modules.join(" "));
             core.setOutput("prs", JSON.stringify(ready));
+            core.setOutput("integration", JSON.stringify(integration));
             core.setOutput("summary", summary);
 
       - name: Report that the module is not ready yet
@@ -610,74 +657,107 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SUMMARY: ${{ steps.gate.outputs.summary }}
         run: |
-          printf '## Etapa merge: en espera\n\nNo se fusiona nada todavía: hay issues del mismo módulo que no están listos. La etapa se repetirá cuando otro issue del módulo pase a `merge` (o al volver a poner `merge` en este).\n\n%s\n' "$SUMMARY" > /tmp/merge.md
+          printf '## Etapa merge: en espera\n\nNo se fusiona nada: un módulo se fusiona en un solo paso y hay issues del módulo que no están listos. La etapa se repetirá cuando otro issue del módulo pase a `merge`.\n\n%s\n' "$SUMMARY" > /tmp/merge.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/merge.md
 
-      - name: Architect - review and merge the module
+      - name: Architect - review, global test or approve and merge
         if: steps.gate.outputs.ready == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          # A different identity from the PR author is needed to approve.
+          GH_TOKEN: ${{ secrets.ARCHITECT_GH_TOKEN || github.token }}
           PRS: ${{ steps.gate.outputs.prs }}
+          INTEGRATION: ${{ steps.gate.outputs.integration }}
+          MODULES: ${{ steps.gate.outputs.modules }}
           SUMMARY: ${{ steps.gate.outputs.summary }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           PROMPT=$(cat <<EOF
           Read CLAUDE.md in full and specs/README.md. Issue #$ISSUE_NUMBER has just reached the MERGE stage.
-          The workflow has already checked that every in-progress issue of its module(s) carries the merge label (tests passed):
+          The workflow has already checked that EVERY open issue of module(s) $MODULES is ready (tests passed, PR open):
           $SUMMARY
 
-          Pull requests to merge (JSON, issue -> PR): $PRS
+          Pull requests of the module (JSON: issue, pr, head commit): $PRS
+          Global module test issues (JSON, label integration; stale_prs = PRs whose current head is not in the tested branch): $INTEGRATION
 
-          You are in the MERGE stage. Your job is to incorporate the module's functionality into $DEFAULT_BRANCH:
-          1. For each issue read its thread (gh issue view <n> --comments) and its PR (gh pr view <pr> --comments): the last "Resultado del plan de pruebas"
-             must be RESULTADO: SUPERADO for the PR's current head commit, CI checks must be green (gh pr checks <pr>) and the PR must be mergeable
-             (gh pr view <pr> --json mergeable,mergeStateStatus,headRefOid,baseRefName). The base branch must be $DEFAULT_BRANCH.
-          2. Check that the PRs together fit the architecture in specs/ and do not contradict each other.
-          3. Decide the merge order from the "Depende de: #<n>" lines (dependencies first; otherwise ascending issue number).
-          4. If every PR passes these checks, merge them one by one in that order with
-             gh pr merge <pr> --merge --subject "Merge pull request #<pr>: <title>"
-             Re-check mergeable before each merge, because a previous merge can create conflicts.
-          5. If a PR fails a check or cannot be merged, do NOT merge it or any PR after it in the order. Explain why, addressed to the person who reviews it,
-             and mark that issue: gh issue edit <n> --remove-label merge --add-label human-review
-             PRs already merged stay merged; say so clearly.
-          Do not edit files, push, approve PRs or close issues by hand (the "Closes #<n>" of each PR closes its issue). Deployment is triggered by the workflow afterwards.
+          You are in the MERGE stage. The module is merged in ONE single step, and you are the only one who decides it. Choose exactly one path:
 
-          The FIRST line of your answer must be exactly one of: FUSIÓN: COMPLETA | FUSIÓN: PARCIAL | FUSIÓN: NINGUNA
-          Your final answer is posted verbatim as a comment on issue #$ISSUE_NUMBER, in the same language as the issue, titled "## Etapa merge"
-          right after that line, with sections Revisión (table: issue, PR, pruebas, CI, mergeable, veredicto), Orden de fusión, Resultado and Siguiente paso.
+          A) GLOBAL TEST NEEDED. With the full view of the module, decide whether its pieces must be tested together before merging
+             (shared contracts or migrations, the same files, flows that cross several PRs, anything "in the air" between them).
+             Also take this path when an integration issue exists but is stale, or failed because of the test plan itself.
+             - If there is no integration issue for the module, create one with the "issue de prueba global" template of the github-issues skill:
+               gh issue create --title "Prueba global del módulo <module>" --label integration --label "module:<module>" --body "..."
+             - If there is one, update its body with what must be tested now: gh issue edit <m> --body "..."
+             Do NOT add the module-test label yourself; the workflow does it. Merge nothing.
+             Write this line in your answer: PRUEBA-GLOBAL: #<m>
+
+          B) GLOBAL TEST FAILED (integration issue up to date with RESULTADO: FALLIDO or BLOQUEADO; read it with gh issue view <m> --comments).
+             Analyse the failure, decide which issue(s) must be fixed and mark them: gh issue edit <n> --remove-label merge --add-label human-review
+             Explain the fix needed for each one. Merge nothing.
+
+          C) MERGE. Only if no global test is needed, or the integration issue is up to date with RESULTADO: SUPERADO.
+             1. Check EVERY PR before touching any: the last "Resultado del plan de pruebas" is SUPERADO for its current head, CI is green (gh pr checks <pr>),
+                it is mergeable (gh pr view <pr> --json mergeable,mergeStateStatus,baseRefName) against $DEFAULT_BRANCH, and the PRs fit specs/ and each other.
+                If any check fails, merge nothing: mark that issue with human-review as in B and explain why.
+             2. Approve every PR: gh pr review <pr> --approve --body "Aprobada por el arquitecto en la etapa merge del módulo (#$ISSUE_NUMBER)."
+             3. Merge them in dependency order ("Depende de: #<n>" first, otherwise ascending issue number), the integration PR (if any) last:
+                gh pr merge <pr> --merge
+                Re-check mergeable before each one. If one unexpectedly fails, stop, mark its issue with human-review and say clearly which PRs are already merged.
+
+          Never edit files, push, or close issues by hand ("Closes #<n>" closes them). Deployment is handled by the workflow.
+
+          The FIRST line of your answer must be exactly one of:
+          FUSIÓN: COMPLETA | FUSIÓN: PARCIAL | FUSIÓN: NINGUNA | FUSIÓN: PRUEBA-GLOBAL
+          Your final answer is posted verbatim as a comment on issue #$ISSUE_NUMBER, in the same language as the issue, with the "etapa merge" template
+          of the github-issues skill.
           EOF
           )
           ALLOWED=(
             "Read" "Grep" "Glob"
             "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git fetch:*)"
-            "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)"
-            "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)" "Bash(gh pr list:*)" "Bash(gh pr merge:*)"
+            "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)" "Bash(gh issue create:*)"
+            "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)" "Bash(gh pr list:*)"
+            "Bash(gh pr review:*)" "Bash(gh pr merge:*)"
           )
           claude -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
             --allowedTools "${ALLOWED[@]}" \
             --output-format text \
-            --max-budget-usd 3 \
+            --max-budget-usd 4 \
             > /tmp/merge.md
 
+      - name: Hand over to module-test if a global test was requested
+        if: always() && steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          M=$(grep -oE 'PRUEBA-GLOBAL: #[0-9]+' /tmp/merge.md 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)
+          [ -n "$M" ] || exit 0
+          gh label create integration --color 1d76db --description "Issue de prueba global de un módulo" 2>/dev/null || true
+          gh label create module-test --color 5319e7 --description "Etapa module-test: prueba global del módulo" 2>/dev/null || true
+          gh label create module-test-done --color c2e0c6 --description "Prueba global terminada: la analiza el arquitecto" 2>/dev/null || true
+          gh issue edit "$M" --add-label integration --remove-label module-test-done --remove-label human-review --add-label module-test
+          gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$M" -f stage=module-test
+
       # Counts merges from GitHub itself, not from the agent's answer.
-      - name: Dispatch the deployment if anything was merged
+      - name: Deploy if anything was merged
         id: deploy
         if: always() && steps.gate.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PRS: ${{ steps.gate.outputs.prs }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          INTEGRATION: ${{ steps.gate.outputs.integration }}
+          HAS_ARCHITECT_TOKEN: ${{ secrets.ARCHITECT_GH_TOKEN != '' }}
         run: |
           MERGED=""
-          for PR in $(echo "$PRS" | grep -oE '"pr":[0-9]+' | cut -d: -f2); do
+          for PR in $(echo "$PRS $INTEGRATION" | grep -oE '"pr":[0-9]+' | cut -d: -f2); do
             if [ "$(gh pr view "$PR" --json state --jq .state)" = "MERGED" ]; then
               MERGED="$MERGED #$PR"
             fi
           done
           echo "merged=$MERGED" >> "$GITHUB_OUTPUT"
-          if [ -n "$MERGED" ]; then
+          # A merge made with ARCHITECT_GH_TOKEN fires `push` and deploy.yml
+          # runs by itself; with GITHUB_TOKEN it must be dispatched.
+          if [ -n "$MERGED" ] && [ "$HAS_ARCHITECT_TOKEN" != "true" ]; then
             gh workflow run deploy.yml --ref "$DEFAULT_BRANCH"
           fi
 
@@ -689,8 +769,165 @@ jobs:
         run: |
           [ -s /tmp/merge.md ] || echo "⚠️ La etapa merge ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/merge.md
           if [ -n "$MERGED" ]; then
-            printf '\n\n---\nPRs fusionadas:%s. Despliegue lanzado: %s/%s/actions/workflows/deploy.yml\n' "$MERGED" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" >> /tmp/merge.md
+            printf '\n\n---\nPRs fusionadas:%s. Despliegue: %s/%s/actions/workflows/deploy.yml\n' "$MERGED" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" >> /tmp/merge.md
           else
             printf '\n\n---\nNo se ha fusionado ninguna PR; no se despliega.\n' >> /tmp/merge.md
           fi
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/merge.md
+
+  # ---------------------------------------------------------------------
+  # Stage 6: module-test (analyst-programmer), label `module-test`
+  # on an `integration` issue created by the architect
+  # ---------------------------------------------------------------------
+  module-test:
+    needs: check-permission
+    if: >-
+      needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'module-test') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'module-test')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'module-test')
+      )
+    runs-on: ionos-l1-claude
+    env:
+      COMPOSE_PROJECT_NAME: formia-moduletest-${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configure git remote and identity
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git config user.name "Claude (automated)"
+          git config user.email "noreply@anthropic.com"
+
+      - name: Find the module's pull requests
+        id: module
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issueNumber = Number(process.env.ISSUE_NUMBER);
+            const labelsOf = (i) => i.labels.map((l) => (typeof l === "string" ? l : l.name));
+            const self = (await github.rest.issues.get({ owner, repo, issue_number: issueNumber })).data;
+            const modules = labelsOf(self).filter((l) => l.startsWith("module:"));
+            if (!modules.length) core.setFailed(`#${issueNumber} no tiene etiqueta module:<x>`);
+            const seen = new Map();
+            for (const label of modules) {
+              const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: "open", labels: label, per_page: 100 });
+              for (const i of issues) {
+                const labels = labelsOf(i);
+                if (i.pull_request || i.number === issueNumber || labels.includes("analysis") || labels.includes("integration")) continue;
+                const pr = (await github.rest.pulls.list({ owner, repo, state: "open", head: `${owner}:issue-${i.number}` })).data[0];
+                if (pr) seen.set(i.number, { issue: i.number, pr: pr.number, branch: pr.head.ref, title: i.title });
+              }
+            }
+            const prs = [...seen.values()].sort((a, b) => a.issue - b.issue);
+            core.setOutput("modules", modules.map((m) => m.slice("module:".length)).join(" "));
+            core.setOutput("branches", prs.map((p) => p.branch).join(" "));
+            core.setOutput("prs", JSON.stringify(prs));
+
+      # issue-<m> is rebuilt from scratch on every run: default branch plus
+      # every PR branch of the module, merged in issue order.
+      - name: Build the integration branch
+        id: build
+        env:
+          BRANCHES: ${{ steps.module.outputs.branches }}
+        run: |
+          git fetch origin
+          git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
+          CONFLICTS=""
+          for B in $BRANCHES; do
+            if ! git merge --no-ff --no-edit "origin/$B"; then
+              git merge --abort
+              CONFLICTS="$CONFLICTS $B"
+            fi
+          done
+          echo "conflicts=$CONFLICTS" >> "$GITHUB_OUTPUT"
+          if [ -n "$CONFLICTS" ]; then
+            printf 'RESULTADO: BLOQUEADO\n## Resultado de la prueba global del módulo\n\nNo se ha podido construir la rama `%s`: hay conflictos al fusionar%s sobre `%s` y lo ya fusionado. No se ejecutan las pruebas.\n' "$BRANCH" "$CONFLICTS" "$DEFAULT_BRANCH" > /tmp/moduletest.md
+          fi
+          cp -n .env.example .env || true
+
+      - name: Analyst - write and run the global test plan
+        if: steps.build.outputs.conflicts == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULES: ${{ steps.module.outputs.modules }}
+          PRS: ${{ steps.module.outputs.prs }}
+        run: |
+          PROMPT=$(cat <<EOF
+          Read CLAUDE.md in full. You are on branch $BRANCH, built by the workflow from $DEFAULT_BRANCH plus every open PR of module(s) $MODULES:
+          $PRS
+          Read issue #$ISSUE_NUMBER and its whole thread (gh issue view $ISSUE_NUMBER --comments): the architect explains there what must be tested together.
+          Read the issues and PRs listed above, and specs/<module>/README.md, design.md and test-plan.md.
+
+          You are in the MODULE-TEST stage. Your job:
+          1. Write or update the section "Pruebas globales del módulo" of specs/<module>/test-plan.md, following the test-plan skill: cases PP-<MOD>-M<N>
+             that test the module's pieces TOGETHER, as the architect asks. Keep the change history citing #$ISSUE_NUMBER.
+             Commit it on $BRANCH: git add specs/ && git commit -m "docs(<module>): add global module test plan (#$ISSUE_NUMBER)". Do not push.
+          2. Run the "Preparación", the "Comprobaciones generales" and every PP-<MOD>-M case, exactly as written, then the "Limpieza" even if something failed.
+             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          3. Do not fix code: if something fails, say which PR or issue causes it, for the architect. Only specs/ may be edited.
+
+          The FIRST line of your answer must be exactly one of: RESULTADO: SUPERADO | RESULTADO: FALLIDO | RESULTADO: BLOQUEADO
+          Your final answer is posted verbatim as a comment on issue #$ISSUE_NUMBER, in the same language as the issue, with the
+          "resultado de la prueba global del módulo" template of the github-issues skill.
+          EOF
+          )
+          ALLOWED=(
+            "Read" "Grep" "Glob"
+            "Edit(specs/**)" "Write(specs/**)"
+            "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
+            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
+            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
+          )
+          claude -p "$PROMPT" \
+            --agent analyst-programmer \
+            --permission-mode dontAsk \
+            --allowedTools "${ALLOWED[@]}" \
+            --output-format text \
+            --max-budget-usd 5 \
+            > /tmp/moduletest.md
+
+      - name: Clean up the test stack
+        if: always()
+        run: |
+          if command -v docker >/dev/null 2>&1; then
+            docker compose down -v --remove-orphans || true
+          fi
+
+      # The integration PR carries the global test plan into main. The
+      # architect merges it last, after the module's PRs.
+      - name: Push the integration branch and open its PR
+        if: always() && steps.build.outputs.conflicts == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODULES: ${{ steps.module.outputs.modules }}
+        run: |
+          git push --force origin "$BRANCH"
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
+            gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
+              --title "test($MODULES): global module test plan (#$ISSUE_NUMBER)" \
+              --body "Rama de integración del módulo \`$MODULES\`: \`$DEFAULT_BRANCH\` + todas sus PRs abiertas, más el plan de pruebas global en \`specs/\`. La fusiona el arquitecto en la etapa \`merge\`, después de las PRs del módulo.
+
+          Closes #$ISSUE_NUMBER"
+          fi
+
+      - name: Post result and hand back to the merge stage
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -s /tmp/moduletest.md ] || echo "⚠️ La etapa module-test ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/moduletest.md
+          gh issue comment "$ISSUE_NUMBER" --body-file /tmp/moduletest.md
+          gh label create module-test-done --color c2e0c6 --description "Prueba global terminada: la analiza el arquitecto" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label module-test --add-label module-test-done
+          gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=merge

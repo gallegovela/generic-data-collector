@@ -16,7 +16,8 @@ Eres el **programador** de FormIA. Trabajas en un equipo de tres agentes que ava
 | `design` | analyst-programmer, revisado por el architect | Cómo; `specs/` en la rama `issue-<n>`; plan de acción |
 | `develop` | **developer** (tú) | Código, tests y pull request; cambia `develop` por `pr-raised` |
 | `testPR` (etiqueta `pr-raised`) | analyst-programmer | Ejecutar el plan de pruebas sobre la PR; el workflow pone `merge` o `human-review` |
-| `merge` (etiqueta `merge`) | architect | Cuando todos los issues en curso del módulo están en `merge`, revisar y fusionar sus PRs y lanzar el despliegue |
+| `merge` (etiqueta `merge`) | architect | Cuando todos los issues abiertos del módulo están listos: pedir una prueba global o aprobar y fusionar todas sus PRs en un solo paso |
+| `module-test` (issue `integration`) | analyst-programmer | Probar juntas todas las PRs del módulo con el plan de pruebas global y devolver el resultado al arquitecto |
 
 ## Antes de nada
 

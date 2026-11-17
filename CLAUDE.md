@@ -5,7 +5,7 @@ Guía del proyecto para Claude Code. Léela antes de cualquier tarea.
 Reglas de oro:
 
 - **La especificación manda.** Cada módulo del software se define en `specs/<modulo>/` antes de escribir código. Si el código y la especificación no coinciden, se para y se corrige primero la especificación (o se pregunta).
-- **Cinco etapas, tres agentes.** El trabajo pasa por `analysis` (arquitecto), `design` (analista programador, revisado por el arquitecto), `develop` (programador), `testPR` (analista programador, con la etiqueta `pr-raised`) y `merge` (arquitecto), coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
+- **Seis etapas, tres agentes.** El trabajo pasa por `analysis` (arquitecto), `design` (analista programador, revisado por el arquitecto), `develop` (programador), `testPR` (analista programador, con la etiqueta `pr-raised`), `merge` (arquitecto) y, si el arquitecto la pide, `module-test` (analista programador), coordinados mediante issues de GitHub. Ver [Agentes y flujo de trabajo](#agentes-y-flujo-de-trabajo).
 
 ## Qué es el proyecto
 
@@ -95,7 +95,7 @@ Reglas:
 
 El proyecto se desarrolla con tres agentes de Claude Code, definidos en `.claude/agents/`, y con skills propias en `.claude/skills/`. Cada agente tiene un nivel de responsabilidad y no invade el de los demás.
 
-El trabajo avanza por issues de GitHub en cinco etapas. Cada etapa se activa poniendo su etiqueta en el issue y la ejecuta un agente:
+El trabajo avanza por issues de GitHub en seis etapas. Cada etapa se activa poniendo su etiqueta en el issue y la ejecuta un agente:
 
 | Etapa (etiqueta) | Agente | Qué recibe | Qué entrega | Skills |
 | --- | --- | --- | --- | --- |
@@ -103,7 +103,8 @@ El trabajo avanza por issues de GitHub en cinco etapas. Cada etapa se activa pon
 | `design` | `analyst-programmer` (analista programador), revisado por el `architect` | Un issue hijo creado por el arquitecto | Rama `issue-<n>` con `specs/` actualizado (requisitos, diseño y plan de pruebas), y como **último comentario** del issue el plan de acción para el desarrollador | `technical-design`, `spec-writing`, `test-plan`, `github-issues` |
 | `develop` | `developer` (programador) | El issue con su plan de acción y la rama `issue-<n>` | Código y tests en la rama `issue-<n>`, una pull request que cierra el issue, y la etiqueta del issue cambiada de `develop` a `pr-raised` | `nextjs-development`, `github-issues` |
 | `testPR` (etiqueta `pr-raised`) | `analyst-programmer` (analista programador) | El issue con la PR abierta y `specs/<modulo>/test-plan.md` | El plan de pruebas ejecutado sobre la rama de la PR y el resultado (`SUPERADO`, `FALLIDO` o `BLOQUEADO`) como comentario en la PR; el workflow cambia `pr-raised` por `merge` (superado) o `human-review` (resto) | `test-plan`, `github-issues` |
-| `merge` | `architect` (arquitecto) | Un issue que acaba de pasar a `merge` | Si todos los issues en curso de su módulo (`module:<modulo>`) están en `merge`, sus PRs revisadas y fusionadas en orden de dependencias y el despliegue lanzado; si no, un comentario con lo que falta | `software-architecture`, `github-issues` |
+| `merge` | `architect` (arquitecto) | Un issue que acaba de pasar a `merge` (o un issue `integration` con la prueba global terminada) | Si **todos** los issues abiertos de su módulo (`module:<modulo>`) están listos: o pide una prueba global (issue `integration`), o aprueba y fusiona todas las PRs del módulo en un solo paso y se despliega. Si no, un comentario con lo que falta | `software-architecture`, `github-issues` |
+| `module-test` | `analyst-programmer` (analista programador) | Un issue `integration` creado por el arquitecto | Rama `issue-<m>` = rama principal + todas las PRs del módulo; sección "Pruebas globales del módulo" en `test-plan.md`; las pruebas ejecutadas y el resultado en el issue; una PR de integración. Después vuelve a `merge` | `test-plan`, `github-issues` |
 
 ### Recorrido de una funcionalidad
 
@@ -130,11 +131,17 @@ issue hijo (etiqueta pr-raised) ──► analyst-programmer: ejecuta specs/<mod
 issue hijo (etiqueta merge)                                 issue hijo (etiqueta human-review)
                      │                                       una persona revisa; vuelve a pr-raised o a merge
                      ▼
-architect: ¿todos los issues en curso del módulo en merge?
-     │ no: espera y comenta qué falta          │ sí: revisa y fusiona las PRs en orden
-     ▼                                         ▼
-(se repite cuando otro issue del módulo     main ──► deploy.yml
- pasa a merge)
+architect: ¿TODOS los issues abiertos del módulo listos? (los no empezados también bloquean)
+     │ no: espera y comenta qué falta
+     │     (se repite cuando otro issue del módulo pasa a merge)
+     │ sí
+     ├──► ¿hace falta una prueba global? ──sí──► issue integration (etiqueta module-test)
+     │                                            analyst-programmer: rama issue-<m> = main + todas las PRs,
+     │                                            plan global en test-plan.md, ejecución, resultado en el issue
+     │                                            ──► module-test-done ──► vuelve a merge
+     │         architect analiza el resultado: FALLIDO ──► human-review en los issues culpables
+     ▼
+architect: aprueba y fusiona TODAS las PRs del módulo (la de integración la última) ──► main ──► deploy.yml
 ```
 
 1. **Análisis (`analysis`, arquitecto).** Lee el issue y todo su hilo, analiza el proyecto en conjunto y propone la arquitectura argumentando cada decisión. Señala errores, contradicciones, riesgos y posibles mejoras, tanto en la petición como en `specs/`, y da recomendaciones sobre cómo actuar. Crea un issue hijo por cada pieza de desarrollo (normalmente uno por módulo afectado), con el contexto, el objetivo y la arquitectura de esa pieza. No edita ficheros del repositorio. También se puede hablar con él directamente con `claude --agent architect`.
@@ -146,23 +153,28 @@ architect: ¿todos los issues en curso del módulo en merge?
    Las piezas de software que define el analista son las rutas y controladores (route handlers o server actions), los servicios, los repositorios de acceso a datos (el "DAO", con Prisma), los esquemas Zod, los componentes, las migraciones y los tests.
 3. **Desarrollo (`develop`, programador).** Trabaja en la rama `issue-<n>` que creó el analista y sigue el último "Plan de acción para el desarrollador". Implementa, escribe los tests, deja el linter, la comprobación de tipos y los tests en verde, sube la rama y, cuando la tarea está lista, abre la pull request con `Closes #<n>` y cambia la etiqueta del issue de `develop` a `pr-raised`. No toma decisiones de diseño: si falta información, pregunta en el issue y se detiene.
 4. **Pruebas de la PR (`testPR`, etiqueta `pr-raised`, analista programador).** Antes de fusionar, ejecuta sobre la rama de la PR el plan de pruebas `specs/<modulo>/test-plan.md`: preparación, comprobaciones generales y casos `PP-<MOD>-NN`. No corrige nada ni hace commits. Publica el resultado en la conversación de la PR, con `RESULTADO: SUPERADO`, `FALLIDO` o `BLOQUEADO` en la primera línea y las comprobaciones manuales pendientes. El workflow cambia la etiqueta: `merge` si el resultado es `SUPERADO`; `human-review` en cualquier otro caso, para que lo revise una persona.
-5. **Fusión (`merge`, arquitecto).** Reúne todos los issues abiertos que comparten la etiqueta `module:<modulo>` con el issue. Si alguno sigue en curso (`design`, `develop`, `pr-raised`, `needs-info`), está en `human-review` o no tiene PR abierta, no hace nada y comenta qué falta; la etapa se repite cuando otro issue del módulo pasa a `merge`. Los issues sin etiqueta de etapa (aún sin empezar) no bloquean. Cuando todos están listos, el arquitecto revisa cada PR (resultado de `testPR`, CI en verde, sin conflictos, coherencia con `specs/`), las fusiona en orden de dependencias (`Depende de: #<n>`) y el workflow lanza `deploy.yml`. Si una PR no se puede fusionar, se detiene ahí y pone `human-review` en su issue.
+5. **Fusión (`merge`, arquitecto).** Un módulo se fusiona **en un solo paso**. El workflow reúne todos los issues abiertos que comparten la etiqueta `module:<modulo>` (salvo los padres con `analysis`). Si alguno no está listo (sin empezar, en `design`, `develop`, `pr-raised` o `needs-info`, en `human-review`, o en `merge` sin PR abierta), no hace nada y comenta qué falta; la etapa se repite cuando otro issue del módulo pasa a `merge`. Cuando todos están listos, el arquitecto, con la visión completa del módulo, elige un camino:
+   - **Prueba global:** si las piezas tienen que probarse juntas (contratos o migraciones compartidos, mismos ficheros, flujos que cruzan varias PRs), crea un issue `integration` del módulo (o actualiza el que hay) y el workflow lo pasa a `module-test`. No fusiona nada.
+   - **Prueba global fallida:** analiza el resultado, pone `human-review` en los issues que hay que corregir y explica qué falla. No fusiona nada.
+   - **Fusión:** comprueba todas las PRs antes de tocar ninguna (resultado de `testPR`, CI en verde, sin conflictos, coherencia con `specs/`), las **aprueba** y las fusiona en orden de dependencias (`Depende de: #<n>`), la de integración la última. Después se despliega. Si una comprobación falla, no fusiona ninguna y pone `human-review` en el issue afectado.
+6. **Prueba global del módulo (`module-test`, analista programador).** Sobre un issue `integration`. El workflow construye la rama `issue-<m>` desde la rama principal fusionando todas las PRs abiertas del módulo (si hay conflictos, el resultado es `BLOQUEADO`). El analista escribe o actualiza la sección "Pruebas globales del módulo" de `specs/<modulo>/test-plan.md` (casos `PP-<MOD>-M<N>`), la ejecuta allí y publica el resultado en el issue. El workflow abre la PR de integración (que lleva ese plan a la rama principal), cambia `module-test` por `module-test-done` y devuelve el control a `merge`, donde el arquitecto analiza el resultado.
 
 ### Aprobaciones y preguntas
 
 - Cuando un agente necesita una decisión de una persona, deja la pregunta en el issue (numerada y con una propuesta por defecto), añade la etiqueta `needs-info` y se detiene.
 - Al responder con un comentario en el issue, se vuelve a ejecutar la etapa de la etiqueta actual con el hilo completo.
-- Pasar de una etapa a la siguiente es una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto. Las excepciones son automáticas: de `develop` a `pr-raised` (el programador, al abrir la PR, lanza `testPR`), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de las pruebas) y de `merge` a `human-review` (el arquitecto, si una PR no se puede fusionar).
+- Pasar de una etapa a la siguiente es una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto. Las excepciones son automáticas: de `develop` a `pr-raised` (el programador, al abrir la PR, lanza `testPR`), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de las pruebas), de `merge` a `human-review` (el arquitecto, si una PR no se puede fusionar o la prueba global falla por ella), la creación del issue `integration` y su paso a `module-test` (arquitecto y workflow) y de `module-test` a `module-test-done` (el workflow).
+- El paso de una etapa automática a la siguiente lo hace el propio workflow lanzándose de nuevo (`workflow_dispatch` con `issue` y `stage`). Una persona puede usar lo mismo desde la pestaña Actions para repetir una etapa.
 - `human-review` lo resuelve una persona: corrige o pide corregir, y vuelve a poner `pr-raised` para repetir las pruebas o `merge` si da la PR por buena.
 
 ### Convenciones de GitHub
 
-- Etiquetas de etapa: `analysis`, `design`, `develop`, `pr-raised` (etapa `testPR`), `merge`. Etiquetas de estado: `needs-info` (bloqueado por una pregunta) y `human-review` (pruebas no superadas o PR que no se puede fusionar). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
+- Etiquetas de etapa: `analysis`, `design`, `develop`, `pr-raised` (etapa `testPR`), `merge`, `module-test`. Etiquetas de estado: `needs-info` (bloqueado por una pregunta), `human-review` (pruebas no superadas o PR que no se puede fusionar) y `module-test-done` (prueba global terminada, pendiente del arquitecto). Etiqueta de tipo: `integration` (issue de prueba global de un módulo). Etiqueta de módulo: `module:<modulo>` (por ejemplo `module:form-schema`).
 - Todo issue hijo enlaza a su padre (`Padre: #<n>`) y el padre mantiene una lista de tareas con sus hijos.
 - Rama de trabajo: `issue-<n>`, donde `<n>` es el número del issue en etapa `design` y `develop`. La crea el analista y la usa el programador.
 - Las plantillas de issue y de comentario están en la skill `github-issues` (`.claude/skills/github-issues/SKILL.md`).
 - Los issues y comentarios se escriben en el idioma del hilo (español por defecto).
-- Solo el arquitecto fusiona PRs, y solo en la etapa `merge`, cuando todos los issues en curso del módulo han superado sus pruebas. Ningún agente aprueba PRs. Una persona puede fusionar a mano en cualquier momento.
+- Solo el arquitecto aprueba y fusiona PRs, y solo en la etapa `merge`, cuando todos los issues abiertos del módulo están listos. Para aprobar usa el secret `ARCHITECT_GH_TOKEN` (una cuenta distinta de la que abre las PRs, porque GitHub no deja que el autor apruebe su propia PR). Una persona puede fusionar a mano en cualquier momento.
 
 ### Cómo invocar a los agentes
 

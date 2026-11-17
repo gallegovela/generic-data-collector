@@ -1,6 +1,6 @@
 ---
 name: test-plan
-description: Cómo escribir y ejecutar el plan de pruebas de un módulo de FormIA (specs/<modulo>/test-plan.md) - casos PP-<MOD>-NN ligados a los criterios de aceptación, ejecutables por un agente desde la línea de comandos antes de fusionar la PR, y cómo informar del resultado en la etapa testPR. Úsala al crear o actualizar un test-plan.md en la etapa "design" y al ejecutarlo en la etapa "testPR" (etiqueta pr-raised).
+description: Cómo escribir y ejecutar el plan de pruebas de un módulo de FormIA (specs/<modulo>/test-plan.md) - casos PP-<MOD>-NN ligados a los criterios de aceptación, ejecutables por un agente desde la línea de comandos antes de fusionar la PR, casos globales PP-<MOD>-M<N> que prueban juntas todas las PRs del módulo, y cómo informar del resultado en las etapas testPR y module-test. Úsala al crear o actualizar un test-plan.md en la etapa "design", al ejecutarlo en la etapa "testPR" (etiqueta pr-raised) y al escribir y ejecutar las pruebas globales en la etapa "module-test".
 ---
 
 # Plan de pruebas (`specs/<modulo>/test-plan.md`)
@@ -38,3 +38,13 @@ Otras restricciones del runner:
 
    No cambies etiquetas: el workflow pone `merge` si el resultado es `SUPERADO` y `human-review` en cualquier otro caso. Un issue en `human-review` bloquea la fusión de todo su módulo hasta que una persona lo revise.
 5. Publica el informe con la plantilla "resultado del plan de pruebas" de la skill `github-issues`. El workflow lo pone en la conversación de la PR.
+
+## Pruebas globales del módulo (etapa `module-test`)
+
+Las pide el arquitecto en la etapa `merge` cuando las piezas de un módulo tienen que probarse juntas. Se trabaja sobre un issue `integration` y la rama `issue-<m>`, que el workflow construye con la rama principal más todas las PRs abiertas del módulo.
+
+1. Escribe o actualiza la sección **"Pruebas globales del módulo"** de `specs/<modulo>/test-plan.md` con lo que pide el arquitecto en el issue. Casos `PP-<MOD>-M<N>`, con el mismo formato que los demás, pero cada uno prueba un escenario que **cruza varias PRs** (no repitas lo que ya prueba cada PR por separado). Los números no se reutilizan.
+2. Haz commit en `issue-<m>` (sin push). La PR de integración lleva ese plan a la rama principal; el arquitecto la fusiona la última.
+3. Ejecuta: Preparación → Comprobaciones generales → casos `PP-<MOD>-M<N>` → Limpieza.
+4. No corriges código. Si algo falla, indica qué PR o issue lo provoca: el arquitecto decide a quién se le pone `human-review`.
+5. Publica el informe con la plantilla "resultado de la prueba global del módulo" de la skill `github-issues`. El workflow lo pone en el issue `integration` y devuelve el control al arquitecto.
