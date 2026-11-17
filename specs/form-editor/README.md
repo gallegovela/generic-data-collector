@@ -103,6 +103,10 @@ sequenceDiagram
 - **CA-EDT-06** — Dado un formulario archivado, cuando se abre el listado por defecto, entonces no aparece en él.
 - **CA-EDT-07** — Dado un campo con una configuración inválida para su tipo (por ejemplo, un `single_choice` sin opciones), cuando pasan 2 s, entonces el borrador no se guarda y el campo señala el problema.
 - **CA-EDT-08** — Dado un formulario con tres campos, cuando el tercero se mueve a la primera posición con el teclado (flechas, sin ratón), entonces el resultado es el mismo que arrastrándolo.
+- **CA-EDT-09** — Dado el editor abierto con el lienzo vacío o con campos, cuando se arrastra un tipo de la paleta al lienzo o se pulsa sobre él, entonces aparece un nuevo campo de ese tipo con su configuración por defecto, tanto arrastrando como pulsando.
+- **CA-EDT-10** — Dado un campo seleccionado, cuando se edita su etiqueta, descripción, obligatoriedad o alguna opción específica de su tipo (por ejemplo las opciones de un `single_choice`) y pasan 2 s, entonces el cambio se guarda y se mantiene al recargar la página.
+- **CA-EDT-11** — Dado un campo sin ninguna condición que lo referencie, cuando se elimina, entonces desaparece del lienzo sin ningún aviso; dado un campo cualquiera, cuando se duplica, entonces aparece una copia con un id distinto y el mismo contenido, y editar la copia no cambia el original.
+- **CA-EDT-12** — Dado un formulario con al menos dos campos, cuando en el panel de propiedades del segundo se elige el primero como campo origen de una condición de visibilidad junto con un operador y un valor válidos, y pasan 2 s, entonces la condición se guarda y se mantiene al recargar la página.
 
 ## Supuestos y preguntas abiertas
 
@@ -115,3 +119,4 @@ sequenceDiagram
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-17 — Diseño técnico (#6): añadidas las secciones "Actores", "Flujos principales", "Datos" y "Supuestos y preguntas abiertas"; añadidos CA-EDT-04 a CA-EDT-08 (crear, duplicar, archivar, bloqueo de guardado con campo inválido, reordenar con teclado), necesarios para cubrir de forma verificable RF-EDT-01, RF-EDT-02, RF-EDT-04 y RF-EDT-10; documentado que `Form.draftSchema` usa un `DraftFormSchema` propio (sin mínimo de campos) en vez de reutilizar `FormVersionSchema` entero, y que las columnas de "versión publicada" y "número de respuestas" son placeholders fijos hasta que existan `form-publishing`/`submissions-dashboard`.
+- 2026-11-17 — Revisión del arquitecto (#6): añadidos CA-EDT-09 a CA-EDT-12 (añadir campo desde la paleta, editar propiedades, eliminar/duplicar sin referencias, condición de visibilidad válida) para cubrir de forma verificable RF-EDT-03, RF-EDT-05, RF-EDT-06 y RF-EDT-07, que no tenían ningún criterio trazable.

@@ -77,7 +77,7 @@ model Organization {
 | Componentes | `src/components/form-editor/field-palette.tsx` | Paleta de tipos de campo, arrastrable y pulsable. |
 | Componentes | `src/components/form-editor/form-canvas.tsx` | Lista ordenable de campos (`@dnd-kit/sortable`), arrastrar y teclado. |
 | Componentes | `src/components/form-editor/field-properties-panel.tsx` | Edita el campo seleccionado: comunes, `config` según `type`, y la condición de visibilidad. |
-| Componentes | `src/components/form-editor/mobile-preview.tsx` | Vista previa simplificada (no interactiva) de los campos visibles, con `DEFAULT_THEME`. |
+| Componentes | `src/components/form-editor/mobile-preview.tsx` | Vista previa simplificada (no interactiva) con `DEFAULT_THEME`. Lista **todos** los campos en orden, incluidos los que tienen `visibleIf`: no evalúa la condición (no hay respuestas reales durante la edición, solo el esquema), simplemente marca cada campo condicional con una insignia/tooltip que describe la condición (p. ej. "Visible si «¿Hay incidencias?» = Sí"). |
 | Componentes | `src/components/form-editor/autosave-indicator.tsx` | "Guardando…" / "Guardado" / error con el campo señalado. |
 | Hooks | `src/hooks/use-form-editor-state.ts` | Estado del borrador en el cliente: campos, selección, mover/añadir/eliminar/duplicar campo. |
 | Hooks | `src/hooks/use-autosave-draft.ts` | Debounce de 2000 ms, valida con `DraftFormSchema`, llama a `saveDraftAction`, expone el estado del indicador. |
@@ -142,13 +142,16 @@ export const saveDraftSchema = z.object({ draft: DraftFormSchema });
 export type SaveDraftInput = z.infer<typeof saveDraftSchema>;
 
 export type DraftFieldIssue = { fieldId: string; message: string };
-/** Convierte los `issues` de un `DraftFormSchema.safeParse` fallido en
- *  una lista `{ fieldId, message }` usando el índice del `path` para
- *  resolver `fieldId = draft.fields[index].id`; útil para que la
- *  interfaz resalte el campo exacto (RF-EDT-10). */
+/** Convierte el `error` de un `DraftFormSchema.safeParse` fallido en
+ *  una lista `{ fieldId, message }` recorriendo `error.issues` y usando
+ *  el índice del `path` para resolver `fieldId = draft.fields[index].id`;
+ *  útil para que la interfaz resalte el campo exacto (RF-EDT-10).
+ *  Se tipa con `z.ZodError` (no `z.core.$ZodIssue[]`, que no se usa en
+ *  `form-schema`/#5) para no depender de un tipo interno de `zod` que
+ *  pueda no ser el mismo entre versiones. */
 export function mapDraftIssuesToFields(
   draft: { fields: Field[] },
-  issues: z.core.$ZodIssue[],
+  error: z.ZodError,
 ): DraftFieldIssue[];
 ```
 
@@ -383,6 +386,10 @@ sequenceDiagram
 | CA-EDT-08 | Playwright | `e2e/form-editor-canvas.spec.ts` — mismo resultado moviendo con teclado (`Tab` hasta el campo, flechas). |
 | CA-EDT-03, CA-EDT-07 | Playwright | `e2e/form-editor-autosave.spec.ts` — edita un campo, espera 2 s, comprueba "Guardado"; deja un `single_choice` sin opciones, espera 2 s, comprueba que señala el campo y no cambia a "Guardado". |
 | CA-EDT-04, CA-EDT-05, CA-EDT-06 | Playwright | `e2e/form-editor-listing.spec.ts` — crear, duplicar y archivar desde `/admin/forms`. |
+| CA-EDT-09, RF-EDT-03 | Playwright | `e2e/form-editor-canvas.spec.ts` — añade un campo arrastrando un tipo de la paleta al lienzo, y otro pulsando sobre un tipo; comprueba que ambos aparecen con su configuración por defecto. |
+| CA-EDT-10, RF-EDT-05 | Playwright | `e2e/form-editor-autosave.spec.ts` — edita etiqueta, descripción, obligatorio y una opción específica del tipo (`single_choice`), espera 2 s, recarga y comprueba que persisten. |
+| CA-EDT-11, RF-EDT-06 | Vitest | `src/hooks/use-form-editor-state.test.ts` — `remove-field` sobre un campo sin referencias no muestra aviso; `duplicate-field` crea una copia con id distinto y mismo contenido, y mutar la copia no cambia el original. |
+| CA-EDT-12, RF-EDT-07 (camino positivo) | Playwright | `e2e/form-editor-autosave.spec.ts` — configura una condición de visibilidad válida (campo origen, operador, valor) en el panel de propiedades, espera 2 s, recarga y comprueba que se mantiene. |
 
 ## Tareas de desarrollo
 
@@ -396,7 +403,7 @@ sequenceDiagram
 | 6 | #6 | `src/server/forms/form.service.ts` + test | 3, 5 |
 | 7 | #6 | `src/server/forms/form.actions.ts` | 6 |
 | 8 | #6 | Añadir `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`; componentes `shadcn/ui` que falten | — |
-| 9 | #6 | `src/hooks/use-form-editor-state.ts` + test | 3 |
+| 9 | #6 | `src/hooks/use-form-editor-state.ts` + test (cubre CA-EDT-02 y CA-EDT-11) | 3 |
 | 10 | #6 | `src/hooks/use-autosave-draft.ts` | 3, 7, 9 |
 | 11 | #6 | `src/components/form-editor/field-palette.tsx`, `form-canvas.tsx` | 4, 8, 9 |
 | 12 | #6 | `src/components/form-editor/field-properties-panel.tsx` | 9 |
@@ -404,8 +411,9 @@ sequenceDiagram
 | 14 | #6 | `src/components/form-editor/form-editor.tsx` (orquesta 11-13, botón IA deshabilitado) | 10, 11, 12, 13 |
 | 15 | #6 | `src/components/form-editor/forms-table.tsx` | 7, 8 |
 | 16 | #6 | `src/app/admin/forms/page.tsx`, `src/app/admin/forms/[id]/page.tsx` | 6, 14, 15 |
-| 17 | #6 | `e2e/form-editor-canvas.spec.ts`, `e2e/form-editor-autosave.spec.ts`, `e2e/form-editor-listing.spec.ts` | 16 |
+| 17 | #6 | `e2e/form-editor-canvas.spec.ts` (CA-EDT-01, 08, 09), `e2e/form-editor-autosave.spec.ts` (CA-EDT-03, 07, 10, 12), `e2e/form-editor-listing.spec.ts` (CA-EDT-04, 05, 06) | 16 |
 
 ## Historial de cambios
 
 - 2026-11-17 — Diseño inicial (#6): modelo `Form` propio (sin `FormVersion`/`Submission`), `DraftFormSchema` sin mínimo de campos, editor con `@dnd-kit`, placeholders para tema real y asistente de IA.
+- 2026-11-17 — Revisión del arquitecto (#6): cobertura de tests para CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06, 07); `mapDraftIssuesToFields` tipado con `z.ZodError` en vez de `z.core.$ZodIssue[]`, para no depender de un tipo interno de `zod`; aclarado que `mobile-preview.tsx` lista todos los campos sin evaluar `visibleIf`, marcando los condicionales con una insignia.

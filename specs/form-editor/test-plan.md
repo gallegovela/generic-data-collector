@@ -132,6 +132,50 @@ npm run db:seed
   ```
 - **Resultado esperado:** código de salida 0; incluye un test que comprueba que `archiveForm`/`updateFormName` con el `organizationId` de otra organización devuelven `null` aunque el `id` exista.
 
+### PP-EDT-10 — Añadir un campo desde la paleta (arrastrando y pulsando)
+
+- **Cubre:** CA-EDT-09
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/form-editor-canvas.spec.ts -g "CA-EDT-09"
+  ```
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-EDT-09» pasan, sin ninguno fallido ni omitido.
+
+### PP-EDT-11 — Editar las propiedades de un campo persiste tras el autoguardado
+
+- **Cubre:** CA-EDT-10
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/form-editor-autosave.spec.ts -g "CA-EDT-10"
+  ```
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-EDT-10» pasan, sin ninguno fallido ni omitido.
+
+### PP-EDT-12 — Eliminar un campo sin referencias y duplicar un campo
+
+- **Cubre:** CA-EDT-11
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** ninguna además de la preparación (es lógica pura, sin base de datos).
+- **Pasos:**
+  ```bash
+  npx vitest run src/hooks/use-form-editor-state.test.ts -t "CA-EDT-11"
+  ```
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-EDT-11» pasan, sin ninguno fallido ni omitido.
+
+### PP-EDT-13 — Configurar una condición de visibilidad válida y guardarla
+
+- **Cubre:** CA-EDT-12
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/form-editor-autosave.spec.ts -g "CA-EDT-12"
+  ```
+- **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-EDT-12» pasan, sin ninguno fallido ni omitido.
+
 ## Pruebas globales del módulo
 
 Todavía no aplica: solo hay un issue (#6) en `form-editor`. Se añadirá cuando el arquitecto pida una prueba global en la etapa `merge`.
@@ -152,3 +196,4 @@ docker compose down -v --remove-orphans
 ## Historial de cambios
 
 - 2026-11-17 — Plan de pruebas inicial (#6): PP-EDT-01 a PP-EDT-09, uno por cada CA-EDT-01 a CA-EDT-08 más el aislamiento multi-tenant transversal.
+- 2026-11-17 — Revisión del arquitecto (#6): PP-EDT-10 a PP-EDT-13, uno por cada CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06 y 07, que no tenían ningún caso trazable).
