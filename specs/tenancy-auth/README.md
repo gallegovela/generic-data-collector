@@ -1,8 +1,9 @@
 # Organizaciones, usuarios y autenticación
 
 - **Prefijo:** `AUT`
-- **Estado:** borrador
+- **Estado:** diseñado
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
+- **Issues:** #1 (análisis), #4 (diseño)
 
 ## Objetivo
 
@@ -18,6 +19,8 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 
 **Fuera de alcance**
 - SSO corporativo, pagos y suscripciones, un usuario en varias organizaciones.
+- Alta de organizaciones nuevas desde la interfaz (self-service): en el piloto, las organizaciones y su primer administrador se crean con el seed de datos de ejemplo ([demo-seed](../demo-seed/README.md)); a partir de ahí, todo usuario nuevo entra por invitación (RF-AUT-04).
+- La marca "pública/restringida" de un formulario concreto (el campo en sí, dentro de `Form`): ese dato lo añade [form-publishing](../form-publishing/README.md) cuando exista la entidad `Form`. Este módulo entrega la parte de infraestructura de RF-AUT-08: las rutas de relleno (`/f/[slug]/**`) no pasan por el guardián de sesión, para que puedan ser públicas por defecto; la variante "restringida a usuarios de la organización" la completará `form-publishing` reutilizando `getCurrentOrg`/`requireSession` de este módulo. Ver [design.md](design.md#resumen).
 
 ## Actores
 
@@ -51,8 +54,8 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 
 ## Datos
 
-- Posee: `Organization`, `User`, sesiones e invitaciones.
-- `Organization` incluye los datos de tema (ver [theming](../theming/README.md)).
+- Posee: `Organization`, `User`, invitaciones (`Invitation`) y tokens de enlace mágico (`LoginToken`). La sesión en sí no se persiste en base de datos: se codifica en una cookie firmada (JWT), ver [design.md](design.md#resumen).
+- `Organization` no incluye todavía los datos de tema: los añade [theming](../theming/README.md) en su propia migración, sobre el `Organization` que crea este módulo.
 
 ## Dependencias
 
@@ -61,14 +64,17 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 
 ## Criterios de aceptación
 
-- **CA-AUT-01** — Dado un administrador de la organización A, cuando pide un formulario de la organización B por su id, entonces recibe 404.
-- **CA-AUT-02** — Dado un `collector`, cuando intenta abrir `/admin`, entonces se le redirige a la app de recogida.
-- **CA-AUT-03** — Dada una invitación enviada, cuando el invitado abre el enlace y crea su contraseña, entonces queda en la organización con el rol indicado.
+- **CA-AUT-01** — Dado un administrador de la organización A, cuando pide o modifica un recurso de la organización B por su id (por ejemplo, otro usuario), entonces el sistema responde como si no existiera (404), sin revelar que pertenece a otra organización. Este módulo lo demuestra con `User`, el único recurso propio con `organizationId`; es el mismo contrato (`getCurrentOrg` + repositorio filtrado) que usarán `Form` y `Submission` cuando existan.
+- **CA-AUT-02** — Dado un `collector`, cuando intenta abrir `/admin`, entonces se le redirige a `/collect` (la app de recogida).
+- **CA-AUT-03** — Dada una invitación enviada, cuando el invitado abre el enlace y crea su contraseña, entonces queda en la organización con el rol indicado y con sesión iniciada.
+- **CA-AUT-04** — Dado un usuario activo con contraseña, cuando inicia sesión con el email y la contraseña correctos, entonces queda con sesión iniciada; con la contraseña incorrecta, se le informa del error sin iniciar sesión.
+- **CA-AUT-05** — Dado un usuario activo que pide un enlace mágico, cuando abre ese enlace, entonces queda con sesión iniciada; si el enlace ya se usó o ha caducado, se le informa del error sin iniciar sesión.
 
 ## Supuestos y preguntas abiertas
 
-- ¿Los trabajadores de campo tendrán cuenta (`collector`) o rellenarán sobre todo formularios públicos? Propuesta: ambos, con formularios públicos por defecto en la demo.
+- **Resuelto (#4)** — ¿Los trabajadores de campo tendrán cuenta (`collector`) o rellenarán sobre todo formularios públicos? Se adopta la propuesta: ambos. Un `collector` tiene cuenta y accede a `/collect` (su app de recogida, protegida por sesión); un formulario publicado puede además marcarse público y rellenarse sin iniciar sesión en `/f/[slug]` (RF-AUT-08), sin pasar por el guardián de sesión de este módulo. El campo que marca un formulario como público lo añade `form-publishing` sobre `Form`; aquí solo se deja la ruta pública sin guardián. Ver [design.md](design.md#resumen).
 
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
+- 2026-11-17 — Diseño técnico (#4): se resuelve la pregunta sobre cuentas `collector` frente a formularios públicos (ambos); se corrige que `Organization` **no** incluye todavía los datos de tema (los añadirá `theming` en su propia migración); se reformula CA-AUT-01 para que sea comprobable ya en este módulo (usando `User` como recurso de prueba, antes de que existan `Form`/`Submission`); se deja explícito que la parte "formulario marcado como público/restringido" de RF-AUT-08 la completa `form-publishing`, y que este módulo solo entrega la infraestructura (rutas `/f/**` sin guardián de sesión); se añaden CA-AUT-04 (login con contraseña, RF-AUT-01) y CA-AUT-05 (login con enlace mágico, RF-AUT-02), que no tenían criterio propio.
