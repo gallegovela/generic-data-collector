@@ -33,7 +33,7 @@ flowchart TD
 
 | Orden | Módulo | Prefijo | Resumen | Estado |
 | --- | --- | --- | --- | --- |
-| 1 | [platform](platform/README.md) | `PLT` | Proyecto base, docker-compose, comandos, CI y despliegue | borrador |
+| 1 | [platform](platform/README.md) | `PLT` | Proyecto base, docker-compose, comandos, CI y despliegue | diseñado |
 | 2 | [tenancy-auth](tenancy-auth/README.md) | `AUT` | Organizaciones, usuarios, roles, inicio de sesión y aislamiento | borrador |
 | 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | borrador |
 | 4 | [theming](theming/README.md) | `THM` | Logo, colores y tipografía por organización | borrador |

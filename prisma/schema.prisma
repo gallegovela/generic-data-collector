@@ -1,0 +1,12 @@
+// prisma/schema.prisma — solo los bloques base; sin modelos todavía
+// Cada módulo posterior (tenancy-auth, etc.) añade sus propios modelos
+// y su propia migración.
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
