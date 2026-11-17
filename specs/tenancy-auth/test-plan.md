@@ -98,14 +98,14 @@ npm run db:seed
 
 ### PP-AUT-07 — Login por la interfaz (admin del seed)
 
-- **Cubre:** CA-AUT-04
+- **Cubre:** CA-AUT-04, RNF-AUT-03
 - **Tipo:** automático (Playwright)
 - **Precondiciones:** `npm run db:seed` ejecutado (preparación); requiere `npm run build` previo o el `webServer` de Playwright.
 - **Pasos:**
   ```bash
   npx playwright test e2e/auth-login.spec.ts
   ```
-- **Resultado esperado:** código de salida 0; con el email/contraseña del admin del seed, `/login` termina en `/admin`; con una contraseña incorrecta, se queda en `/login` mostrando un mensaje de error, sin sesión.
+- **Resultado esperado:** código de salida 0; con `admin@demo.formia.local` / `Demo1234!` (credenciales del seed, ver `design.md#datos-de-ejemplo-seed`), `/login` termina en `/admin`; con una contraseña incorrecta, se queda en `/login` mostrando un mensaje de error, sin sesión; el test también comprueba que la cookie de sesión se envía con los atributos `HttpOnly` y `SameSite=Lax` (`secure` no aplica en `http://localhost` de desarrollo) (RNF-AUT-03).
 
 ### PP-AUT-08 — Un `collector` no entra en `/admin`
 
@@ -116,7 +116,7 @@ npm run db:seed
   ```bash
   npx playwright test e2e/auth-admin-guard.spec.ts
   ```
-- **Resultado esperado:** código de salida 0; con sesión del `collector` del seed, `page.goto("/admin")` termina en `/collect`; con sesión del admin del seed, `/admin` responde 200.
+- **Resultado esperado:** código de salida 0; con sesión del `collector` del seed (`collector@demo.formia.local` / `Demo1234!`), `page.goto("/admin")` termina en `/collect`; con sesión del admin del seed (`admin@demo.formia.local` / `Demo1234!`), `/admin` responde 200.
 
 ### PP-AUT-09 — Aceptar invitación desde la interfaz
 
@@ -144,3 +144,4 @@ docker compose down -v --remove-orphans
 ## Historial de cambios
 
 - 2026-11-17 — Plan de pruebas inicial (#4): casos PP-AUT-01 a PP-AUT-09 para el login con contraseña, el enlace mágico, las invitaciones, el aislamiento por organización (CA-AUT-01), la autodesactivación bloqueada y el guardián de `/admin` (CA-AUT-02).
+- 2026-11-17 — Revisión del arquitecto (#4, APROBADO): PP-AUT-07/08 fijan las credenciales exactas del seed (antes sin valor concreto); PP-AUT-07 añade la comprobación de los atributos `HttpOnly`/`SameSite` de la cookie de sesión (RNF-AUT-03).

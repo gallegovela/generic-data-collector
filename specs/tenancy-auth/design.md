@@ -132,7 +132,20 @@ model LoginToken {
 | Interfaz | `src/app/admin/layout.tsx`, `src/app/admin/page.tsx` | Layout protegido y placeholder del panel (el contenido real lo añade `form-editor`, #6). |
 | Interfaz | `src/app/admin/users/page.tsx` | Listado de usuarios e invitaciones de la organización, invitar, desactivar. |
 | Interfaz | `src/app/collect/page.tsx` | Placeholder de la app de recogida (el contenido real lo añade `field-collector`). |
-| Datos de ejemplo | `prisma/seed.ts` (modificar) | Crea la organización de ejemplo, un admin y un collector (sustituye el placeholder de `platform`). |
+| Datos de ejemplo | `prisma/seed.ts` (modificar) | Crea la organización de ejemplo, un admin y un collector (sustituye el placeholder de `platform`). Credenciales fijas, ver [Datos de ejemplo (seed)](#datos-de-ejemplo-seed). |
+
+### Datos de ejemplo (seed)
+
+`prisma/seed.ts` crea exactamente estos registros (los consumen PP-AUT-07, PP-AUT-08 y el futuro `demo-seed`; no deben variar entre quien escribe el seed y quien escribe los tests e2e):
+
+| Campo | Admin | Collector |
+| --- | --- | --- |
+| `Organization.name` | "Constructora Demo" (la misma para ambos) | |
+| `email` | `admin@demo.formia.local` | `collector@demo.formia.local` |
+| `password` (texto plano, antes de `hashPassword`) | `Demo1234!` | `Demo1234!` |
+| `name` | "Admin Demo" | "Collector Demo" |
+| `role` | `admin` | `collector` |
+| `status` | `active` | `active` |
 
 Convención de nombre adoptada: el código de este módulo vive en `src/server/auth/` (no `src/server/tenancy-auth/`), porque coincide con el fichero raíz idiomático de Auth.js v5 (`src/auth.ts`) y con el nombre corto que van a importar todos los módulos (`@/server/auth/session`). Se señala como decisión a confirmar por el arquitecto (ver preguntas en el issue).
 
@@ -479,7 +492,7 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 | — (utilidad) | Vitest | `src/lib/auth/emails.test.ts` — `buildMagicLinkEmail`/`buildInvitationEmail` incluyen la URL recibida en el HTML y en el texto. |
 | CA-AUT-02 | Playwright | `e2e/auth-admin-guard.spec.ts` — con sesión de `collector` (login por UI), `GET /admin` redirige a `/collect`; con sesión de `admin`, `/admin` carga. |
 | CA-AUT-03 | Playwright | `e2e/auth-invitation.spec.ts` — un `beforeAll` crea una invitación llamando directamente a `userService.inviteUser` (sin pasar por email); el test abre `/invite/<token>`, fija una contraseña y comprueba que termina con sesión iniciada en la organización y el rol correctos. |
-| RF-AUT-01, CA-AUT-04 | Playwright | `e2e/auth-login.spec.ts` — login con el admin del seed y contraseña correcta entra en `/admin`; con contraseña incorrecta se queda en `/login` con un mensaje de error. |
+| RF-AUT-01, CA-AUT-04, RNF-AUT-03 | Playwright | `e2e/auth-login.spec.ts` — login con el admin del seed (`admin@demo.formia.local` / `Demo1234!`, ver [Datos de ejemplo (seed)](#datos-de-ejemplo-seed)) y contraseña correcta entra en `/admin`; con contraseña incorrecta se queda en `/login` con un mensaje de error; comprueba que la cookie de sesión lleva `HttpOnly` y `SameSite=Lax`. |
 
 ## Tareas de desarrollo
 
@@ -502,9 +515,10 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 | 15 | #4 | `src/app/login/page.tsx` + `login-form.tsx`, `src/app/login/magic/page.tsx` | 11, 14 |
 | 16 | #4 | `src/app/invite/[token]/page.tsx` + `accept-invitation-form.tsx` | 14 |
 | 17 | #4 | `src/app/admin/layout.tsx`, `src/app/admin/page.tsx`, `src/app/admin/users/page.tsx`, `src/app/collect/page.tsx` | 13, 14 |
-| 18 | #4 | `prisma/seed.ts` (admin + collector de ejemplo) | 7, 9 |
+| 18 | #4 | `prisma/seed.ts` (admin + collector de ejemplo, credenciales de [Datos de ejemplo (seed)](#datos-de-ejemplo-seed)) | 7, 9 |
 | 19 | #4 | `e2e/auth-login.spec.ts`, `e2e/auth-admin-guard.spec.ts`, `e2e/auth-invitation.spec.ts` | 15, 16, 17, 18 |
 
 ## Historial de cambios
 
 - 2026-11-17 — Diseño técnico inicial (#4): modelo de datos (`Organization`, `User`, `Invitation`, `LoginToken`), Auth.js v5 con sesión JWT y dos proveedores `Credentials` (contraseña y enlace mágico), guardián de sesión (`middleware.ts`, `session.ts`) y su reutilización por los módulos siguientes, invitación de usuarios, límite de intentos de login en memoria, e integración de email genérica.
+- 2026-11-17 — Revisión del arquitecto (#4, APROBADO): se fijan las credenciales exactas del seed ([Datos de ejemplo (seed)](#datos-de-ejemplo-seed)), de las que dependían PP-AUT-07/08 sin un valor concreto documentado.
