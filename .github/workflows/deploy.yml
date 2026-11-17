@@ -2,9 +2,11 @@ name: Deploy
 
 # Continuous deployment: every push to `main` pulls (or clones, on the
 # first run) the persistent checkout at `SOURCE_PATH` on the runner's
-# host, then rebuilds and restarts the docker-compose stack there. See
-# spec/deploy.md for the full rationale (why SOURCE_PATH instead of
-# actions/checkout, queue-don't-cancel, no rollback on build failure).
+# host, generates `.env` from `.env.example` plus the `ionosL1`
+# environment's secrets and variables, then rebuilds and restarts the
+# docker-compose stack there. See spec/deploy.md for the full rationale
+# (why SOURCE_PATH instead of actions/checkout, queue-don't-cancel, no
+# rollback on build failure).
 
 on:
   push:
@@ -20,6 +22,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ionos-l1-docker
+    environment: ionosL1
     steps:
       - name: Pull or clone the persistent checkout
         env:
@@ -34,11 +37,60 @@ jobs:
             git clone --branch main "$REMOTE_URL" "$SOURCE_PATH"
           fi
 
+      # Builds .env from .env.example line by line: comments and blank
+      # lines are kept, and every KEY=value whose KEY is defined in the
+      # environment (secrets first, then variables) gets that value.
+      # .env.example is copied, not moved, so the tracked file stays in
+      # the checkout and the next `git pull` keeps working.
+      - name: Generate .env from .env.example
+        uses: actions/github-script@v7
+        env:
+          SOURCE_PATH: ${{ secrets.SOURCE_PATH }}
+          ENV_SECRETS: ${{ toJSON(secrets) }}
+          ENV_VARS: ${{ toJSON(vars) }}
+        with:
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+
+            const dir = process.env.SOURCE_PATH;
+            const secrets = JSON.parse(process.env.ENV_SECRETS || "{}");
+            const vars = JSON.parse(process.env.ENV_VARS || "{}");
+
+            const lines = fs
+              .readFileSync(path.join(dir, ".env.example"), "utf8")
+              .split(/\r?\n/);
+
+            const replaced = [];
+            const output = lines.map((line) => {
+              const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+              if (!match) return line;
+
+              const key = match[1];
+              const value = key in secrets ? secrets[key] : vars[key];
+              if (value === undefined) return line;
+
+              if (/[\r\n]/.test(value)) {
+                core.setFailed(`${key}: multi-line values are not supported in .env`);
+                return line;
+              }
+
+              replaced.push(key);
+              return `${key}=${value}`;
+            });
+
+            const target = path.join(dir, ".env");
+            fs.writeFileSync(target, output.join("\n"), { mode: 0o600 });
+            fs.chmodSync(target, 0o600);
+
+            // Only key names are logged, never values.
+            core.info(`.env written; values from environment: ${replaced.join(", ") || "(none)"}`);
+
       - name: Rebuild and restart the stack
         env:
           SOURCE_PATH: ${{ secrets.SOURCE_PATH }}
         run: |
           cd "$SOURCE_PATH"
-          docker-compose down
-          docker-compose build --no-cache
-          docker-compose up -d
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml down
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache
+          docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d

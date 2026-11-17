@@ -8,6 +8,14 @@ services:
       - "3000:3000"
     env_file:
       - .env
+    # Dentro de la red de Docker la app llega a los servicios por su
+    # nombre (postgres, minio), nunca por localhost. Estos valores pisan
+    # los de .env para que no dependan de cómo se haya rellenado.
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-formia}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatoria}@postgres:5432/${POSTGRES_DB:-formia}
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: "true"
     depends_on:
       - postgres
       - minio
@@ -15,11 +23,24 @@ services:
 
   # En producción solo la app expone puerto hacia el exterior; el resto
   # de servicios queda accesible únicamente en la red interna de Docker.
+  # Las credenciales salen de .env (docker compose lo lee para interpolar
+  # ${...}), así la app y cada servicio comparten los mismos valores.
+  # Ojo: Postgres y MinIO solo aplican estas credenciales al inicializar
+  # un volumen vacío; si el volumen ya existe, se mantienen las antiguas.
   postgres:
     ports: []
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-formia}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatoria}
+      POSTGRES_DB: ${POSTGRES_DB:-formia}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
 
   minio:
     ports: []
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?S3_ACCESS_KEY es obligatoria}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?S3_SECRET_KEY es obligatoria}
 
   mailpit:
     ports: []
