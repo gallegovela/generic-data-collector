@@ -384,6 +384,7 @@ jobs:
           git config user.email "noreply@anthropic.com"
 
       - name: Developer - implement and open PR
+        id: developer
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -392,6 +393,9 @@ jobs:
           Read CLAUDE.md in full. You are on branch $BRANCH, which already holds the specs/ changes for issue #$ISSUE_NUMBER.
           Read the issue and its whole thread (gh issue view $ISSUE_NUMBER --comments). The comment titled "Plan de acción para el desarrollador"
           (the latest one, if there are several) is your work order; follow it together with the specs/ it references.
+          If a pull request from $BRANCH already exists (gh pr list --head $BRANCH), read its conversation too (gh pr view <pr> --comments):
+          the "Resultado del plan de pruebas" comments from testPR tell you what failed. Fix what is caused by the code; if a failure comes
+          from the test plan or specs/ themselves, do not change them: explain it in your answer.
 
           You are in the DEVELOP stage. Your job:
           1. Implement exactly what the plan says, with the tests it lists. Do not make design decisions: if the plan is incomplete or contradictory,
@@ -413,7 +417,7 @@ jobs:
             --agent developer \
             --dangerously-skip-permissions \
             --output-format text \
-            --max-budget-usd 10 \
+            --max-budget-usd "${{ vars.DEVELOP_BUDGET_USD || 25 }}" \
             > /tmp/develop.md
 
       - name: Push any remaining commits
@@ -425,13 +429,23 @@ jobs:
 
       # Safety net for step 5 of the prompt: if an open PR exists but the
       # label was not swapped, swap it here. Then hand over to testPR.
+      # If the developer step failed (budget exhausted, crash), the PR may
+      # be left over from an earlier run with half-done work on top, so
+      # the issue only moves on if the agent itself already swapped the
+      # label, which it does only once the PR is ready.
       - name: Move the issue to pr-raised
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
         run: |
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           [ -n "$PR" ] || exit 0
+          if [ "$DEVELOPER_OUTCOME" != "success" ] && \
+             ! gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx pr-raised; then
+            echo "Developer step did not finish; the issue stays in develop."
+            exit 0
+          fi
           gh label create pr-raised --color 5319e7 --description "PR abierta: etapa testPR" 2>/dev/null || true
           gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label pr-raised
           gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=test-pr
@@ -441,7 +455,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/develop.md
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if grep -q "Exceeded USD budget" /tmp/develop.md 2>/dev/null; then
+            # The CLI replaces the agent's answer with this one line.
+            {
+              printf '⚠️ **La etapa de desarrollo se ha quedado sin presupuesto** (`%s`) antes de terminar, así que no hay resumen del programador.\n\n' "$(head -c 200 /tmp/develop.md)"
+              printf -- '- Lo hecho hasta ese momento está en la rama `%s` (se suben los commits pendientes).\n' "$BRANCH"
+              printf -- '- Si el programador ya había abierto la PR y cambiado la etiqueta a `pr-raised`, la etapa testPR se lanza igualmente; si no, el issue sigue en `develop`.\n'
+              printf -- '- Para continuar, comenta en el issue (se repite la etapa con la etiqueta actual) o sube la variable `DEVELOP_BUDGET_USD` del repositorio. Si el issue es demasiado grande, pide al arquitecto que lo divida.\n\n'
+              printf 'Log de la ejecución: %s\n' "$RUN_URL"
+            } > /tmp/develop-note.md
+            mv /tmp/develop-note.md /tmp/develop.md
+          fi
+          [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: $RUN_URL" > /tmp/develop.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/develop.md
 
   # ---------------------------------------------------------------------
