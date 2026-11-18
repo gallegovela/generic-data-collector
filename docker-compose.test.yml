@@ -34,9 +34,13 @@ services:
     ports: !reset []
 
   # Crea el bucket de .env.example (formia) para las pruebas que suben
-  # archivos. Se ejecuta una vez con `run`.
+  # archivos. Se ejecuta una vez con `run`. Usa la misma imagen que el
+  # servicio minio (que trae `mc`), para no depender de otra imagen:
+  # MinIO ya no publica sus imágenes en Docker Hub ni en quay.io, y en el
+  # runner se cargan a mano (ver "Pruebas en contenedores" en
+  # specs/platform/design.md).
   minio-init:
-    image: minio/mc:latest
+    image: minio/minio:latest
     profiles: ["tests"]
     depends_on:
       - minio

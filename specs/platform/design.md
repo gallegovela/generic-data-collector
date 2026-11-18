@@ -175,6 +175,13 @@ Funcionamiento:
 - Las variables salen de `.env.example` (sin secretos). `docker-compose.test.yml` sustituye las que apuntan a `localhost` por el nombre del servicio; un módulo que añada a `.env.example` una variable de ese tipo la añade también allí.
 - Playwright usa `E2E_BASE_URL` (`http://web:3000`) si está definida; si no, arranca `npm run dev` como hasta ahora.
 - En `testPR`, el workflow fusiona antes la última rama principal en la rama de la PR (solo en local): se prueba lo que quedaría al fusionar.
+- **Imagen de MinIO.** MinIO dejó de publicar `minio/minio` en Docker Hub y quay.io, así que el Docker del runner de pruebas no puede descargarla. Mientras no se decida un sustituto, se copia desde un Docker que aún la tenga (el del servidor, donde corre la demo) al Docker-in-Docker del runner, una vez y cada vez que se borre su volumen:
+
+  ```bash
+  docker save minio/minio:latest | docker exec -i gh-runner-claude-test-dind docker load
+  ```
+
+  Compose usa la imagen local y no intenta descargarla. Conviene guardar también una copia (`docker save minio/minio:latest -o minio.tar`) fuera del servidor.
 
 ## Tareas de desarrollo
 
