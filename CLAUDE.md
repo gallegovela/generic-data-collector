@@ -165,6 +165,7 @@ architect: aprueba y fusiona TODAS las PRs del módulo (la de integración la ú
 - Al responder con un comentario en el issue, se vuelve a ejecutar la etapa de la etiqueta actual con el hilo completo.
 - Pasar de una etapa a la siguiente es una decisión humana: poner `design` en los issues hijos que se aprueban y `develop` cuando el plan de acción es correcto. Las excepciones son automáticas: de `develop` a `pr-raised` (el programador, al abrir la PR, lanza `testPR`), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de las pruebas), de `merge` a `human-review` (el arquitecto, si una PR no se puede fusionar o la prueba global falla por ella), la creación del issue `integration` y su paso a `module-test` (arquitecto y workflow) y de `module-test` a `module-test-done` (el workflow).
 - El paso de una etapa automática a la siguiente lo hace el propio workflow lanzándose de nuevo (`workflow_dispatch` con `issue` y `stage`). Una persona puede usar lo mismo desde la pestaña Actions para repetir una etapa.
+- Los agentes del workflow usan la suscripción de Claude. Si el uso de la ventana de 5 horas o el semanal llega al umbral (variables `AGENT_MAX_FIVE_HOUR_PCT` y `AGENT_MAX_SEVEN_DAY_PCT`, 90 % por defecto), la etapa se detiene, deja en el issue cuándo se renueva el uso y no cambia la etiqueta; un comentario en el issue la repite.
 - `human-review` lo resuelve una persona: corrige o pide corregir, y vuelve a poner `pr-raised` para repetir las pruebas o `merge` si da la PR por buena.
 
 ### Convenciones de GitHub

@@ -4,7 +4,13 @@ name: Issue pipeline
 # ionosL1 self-hosted runner as one of the project agents defined in
 # .claude/agents/ (see CLAUDE.md, "Agentes y flujo de trabajo").
 # Authenticated via CLAUDE_CODE_OAUTH_TOKEN (a long-lived token from
-# `claude setup-token`, stored as an organization secret).
+# `claude setup-token`, stored as an organization secret), so agents use
+# the Claude subscription. Every agent runs through
+# .github/scripts/run-agent.mjs, which stops it when the subscription's
+# 5-hour or weekly usage reaches AGENT_MAX_FIVE_HOUR_PCT /
+# AGENT_MAX_SEVEN_DAY_PCT (repository variables, default 90). A stopped
+# stage posts a note with the reset time, keeps the issue's label and does
+# not hand over; a comment on the issue re-runs it.
 #
 # analysis -> architect. Reviews the request against the whole project,
 #             argues the architecture, points out errors and improvements,
@@ -98,6 +104,10 @@ env:
   ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue }}
   BRANCH: issue-${{ github.event.issue.number || inputs.issue }}
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  # Subscription usage (percent) at which an agent is stopped, for the
+  # 5-hour and the weekly window. See .github/scripts/run-agent.mjs.
+  AGENT_MAX_FIVE_HOUR_PCT: ${{ vars.AGENT_MAX_FIVE_HOUR_PCT || 90 }}
+  AGENT_MAX_SEVEN_DAY_PCT: ${{ vars.AGENT_MAX_SEVEN_DAY_PCT || 90 }}
 
 jobs:
   check-permission:
@@ -137,6 +147,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
+
       - name: Architect - analysis
         env:
           GH_TOKEN: ${{ github.token }}
@@ -170,13 +194,10 @@ jobs:
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue create:*)" "Bash(gh issue edit:*)"
             "Bash(gh label list:*)" "Bash(gh label create:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/analysis.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 3 \
-            > /tmp/analysis.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Post result comment
         if: always()
@@ -197,6 +218,20 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Configure git remote and identity
         env:
@@ -243,13 +278,10 @@ jobs:
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/draft.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/draft.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Post draft comment
         env:
@@ -285,13 +317,10 @@ jobs:
             "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/review.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 2 \
-            > /tmp/review.md
+            --allowedTools "${ALLOWED[@]}"
           VERDICT=$(grep -oE 'VEREDICTO: (APROBADO|CAMBIOS|PREGUNTA)' /tmp/review.md | head -1 | cut -d' ' -f2)
           echo "verdict=${VERDICT:-CAMBIOS}" >> "$GITHUB_OUTPUT"
 
@@ -328,13 +357,10 @@ jobs:
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
             "Bash(gh issue view:*)" "Bash(gh issue edit:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/plan.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 3 \
-            > /tmp/plan.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Push the issue branch
         if: always()
@@ -356,7 +382,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
 
   # ---------------------------------------------------------------------
   # Stage 3: develop (developer)
@@ -374,6 +404,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Configure git remote and identity
         env:
@@ -413,12 +453,9 @@ jobs:
           check results, PR link (or what blocks it).
           EOF
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/develop.md -p "$PROMPT" \
             --agent developer \
-            --dangerously-skip-permissions \
-            --output-format text \
-            --max-budget-usd "${{ vars.DEVELOP_BUDGET_USD || 25 }}" \
-            > /tmp/develop.md
+            --dangerously-skip-permissions
 
       - name: Push any remaining commits
         if: always()
@@ -429,16 +466,21 @@ jobs:
 
       # Safety net for step 5 of the prompt: if an open PR exists but the
       # label was not swapped, swap it here. Then hand over to testPR.
-      # If the developer step failed (budget exhausted, crash), the PR may
-      # be left over from an earlier run with half-done work on top, so
-      # the issue only moves on if the agent itself already swapped the
-      # label, which it does only once the PR is ready.
+      # If the developer step failed (crash), the PR may be left over from
+      # an earlier run with half-done work on top, so the issue only moves
+      # on if the agent itself already swapped the label, which it does
+      # only once the PR is ready. A stop for the usage limit never hands
+      # over: testPR would be stopped as well.
       - name: Move the issue to pr-raised
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            echo "Stopped by the subscription usage limit; no hand-over."
+            exit 0
+          fi
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           [ -n "$PR" ] || exit 0
           if [ "$DEVELOPER_OUTCOME" != "success" ] && \
@@ -455,19 +497,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          if grep -q "Exceeded USD budget" /tmp/develop.md 2>/dev/null; then
-            # The CLI replaces the agent's answer with this one line.
-            {
-              printf '⚠️ **La etapa de desarrollo se ha quedado sin presupuesto** (`%s`) antes de terminar, así que no hay resumen del programador.\n\n' "$(head -c 200 /tmp/develop.md)"
-              printf -- '- Lo hecho hasta ese momento está en la rama `%s` (se suben los commits pendientes).\n' "$BRANCH"
-              printf -- '- Si el programador ya había abierto la PR y cambiado la etiqueta a `pr-raised`, la etapa testPR se lanza igualmente; si no, el issue sigue en `develop`.\n'
-              printf -- '- Para continuar, comenta en el issue (se repite la etapa con la etiqueta actual) o sube la variable `DEVELOP_BUDGET_USD` del repositorio. Si el issue es demasiado grande, pide al arquitecto que lo divida.\n\n'
-              printf 'Log de la ejecución: %s\n' "$RUN_URL"
-            } > /tmp/develop-note.md
-            mv /tmp/develop-note.md /tmp/develop.md
-          fi
-          [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: $RUN_URL" > /tmp/develop.md
+          [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/develop.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/develop.md
 
   # ---------------------------------------------------------------------
@@ -495,6 +525,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Find the pull request
         id: pr
@@ -544,13 +584,10 @@ jobs:
             "Bash(docker compose:*)" "Bash(curl:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/testpr.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/testpr.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Clean up the test stack
         if: always()
@@ -561,12 +598,17 @@ jobs:
 
       # Only SUPERADO moves the issue to `merge`. Anything else (FALLIDO,
       # BLOQUEADO, a crash with no result line) goes to `human-review`.
+      # A stop for the usage limit keeps `pr-raised`.
       - name: Post result and set the next label
         if: always() && steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+            exit 0
+          fi
           [ -s /tmp/testpr.md ] || echo "⚠️ La etapa testPR ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/testpr.md
           gh pr comment "$PR_NUMBER" --body-file /tmp/testpr.md
           RESULT=$(grep -oE 'RESULTADO: (SUPERADO|FALLIDO|BLOQUEADO)' /tmp/testpr.md | head -1 | cut -d' ' -f2)
@@ -605,6 +647,20 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       # Deterministic gate, no agent involved. A module is merged in one
       # single step, so EVERY open issue sharing a `module:<x>` label with
@@ -757,13 +813,10 @@ jobs:
             "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)" "Bash(gh pr list:*)"
             "Bash(gh pr review:*)" "Bash(gh pr merge:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/merge.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/merge.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Hand over to module-test if a global test was requested
         if: always() && steps.gate.outputs.ready == 'true'
@@ -839,6 +892,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Configure git remote and identity
         env:
@@ -930,13 +993,10 @@ jobs:
             "Bash(docker compose:*)" "Bash(curl:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/moduletest.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 5 \
-            > /tmp/moduletest.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Clean up the test stack
         if: always()
@@ -953,6 +1013,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODULES: ${{ steps.module.outputs.modules }}
         run: |
+          [ ! -f "$RUNNER_TEMP/usage-limit.md" ] || exit 0
           git push --force origin "$BRANCH"
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
             gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
@@ -967,6 +1028,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+            exit 0
+          fi
           [ -s /tmp/moduletest.md ] || echo "⚠️ La etapa module-test ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/moduletest.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/moduletest.md
           gh label create module-test-done --color c2e0c6 --description "Prueba global terminada: la analiza el arquitecto" 2>/dev/null || true
