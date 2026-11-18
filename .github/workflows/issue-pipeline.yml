@@ -51,6 +51,12 @@ name: Issue pipeline
 #             opens the integration PR, sets `module-test-done` and hands
 #             back to the merge stage, where the architect analyses it.
 #
+# After analysis the pipeline runs on its own: the architect creates the
+# children with `design` (the workflow dispatches their design stage),
+# the analyst swaps `design` for `develop` once the final plan is posted
+# (the workflow dispatches develop), and so on until the module is merged
+# or an issue stops in `needs-info` or `human-review` for a person.
+#
 # Re-triggers on a human comment too (not just a fresh label), so
 # answering a question in the thread re-runs the *current* label's stage.
 # Comments and labels written by this workflow use GITHUB_TOKEN, which
@@ -85,7 +91,7 @@ on:
         description: Etapa a ejecutar
         required: true
         type: choice
-        options: [test-pr, merge, module-test]
+        options: [design, develop, test-pr, merge, module-test]
 
 permissions:
   actions: write        # gh workflow run: hand-overs between stages and deploy.yml
@@ -161,6 +167,15 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
+      # Children are found through "Padre: #<n>" in their body, with the
+      # list API (the search API lags behind newly created issues).
+      - name: Remember the existing child issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list --state all --limit 500 --json number,body \
+            --jq "[.[] | select(.body | test(\"Padre: #$ISSUE_NUMBER\\\\b\")) | .number]" > "$RUNNER_TEMP/children-before.json"
+
       - name: Architect - analysis
         env:
           GH_TOKEN: ${{ github.token }}
@@ -178,8 +193,11 @@ jobs:
              gh issue edit $ISSUE_NUMBER --add-label needs-info
              and do NOT create child issues yet. If the thread already answers your previous questions, remove needs-info and continue.
           5. Otherwise create one child issue per development piece (normally one per module affected), following the "design" issue template of the github-issues skill,
-             with gh issue create --title "..." --body "..." --label "module:<module>" (create a missing label with gh label create).
-             Pass the body inline with --body; do not use pipes, heredocs or temporary files. Do NOT add the design label: a human adds it to approve each child.
+             with gh issue create --title "..." --body "..." --label design --label "module:<module>" (create a missing label with gh label create).
+             The body must contain the line "Padre: #$ISSUE_NUMBER". Pass the body inline with --body; do not use pipes, heredocs or temporary files.
+             The design label starts the analyst's design stage right away, so only create a child when its piece is fully decided.
+             Pieces of the same module are merged together in one single step, so each one must be developable from $DEFAULT_BRANCH on its own:
+             do not make a piece depend on another unmerged piece of the same module (merge them into one child instead).
              Do not duplicate children that already exist; update them with gh issue edit instead.
           6. Update the task list of issue #$ISSUE_NUMBER with its children (gh issue edit $ISSUE_NUMBER --body "...", keeping the original text).
           You must not modify any file in the repository.
@@ -207,12 +225,38 @@ jobs:
           [ -s /tmp/analysis.md ] || echo "⚠️ La etapa de análisis ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/analysis.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/analysis.md
 
+      # Labels set with GITHUB_TOKEN do not trigger runs, so the design
+      # stage of every child created in this run is dispatched here. Only
+      # new open children: the ones that existed before are already in
+      # their own stage. Nothing starts while the parent waits for answers.
+      - name: Start the design stage of the new children
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx needs-info; then
+            echo "The parent is waiting in needs-info; no child starts."
+            exit 0
+          fi
+          gh label create design --color d73a4a --description "Etapa design: analista programador" 2>/dev/null || true
+          NEW=$(gh issue list --state open --limit 500 --json number,body \
+            --jq "[.[] | select(.body | test(\"Padre: #$ISSUE_NUMBER\\\\b\")) | .number] - $(cat "$RUNNER_TEMP/children-before.json") | .[]")
+          for CHILD in $NEW; do
+            gh issue edit "$CHILD" --add-label design
+            gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$CHILD" -f stage=design
+            echo "Design stage dispatched for #$CHILD"
+          done
+
   # ---------------------------------------------------------------------
   # Stage 2: design (analyst-programmer, supervised by the architect)
   # ---------------------------------------------------------------------
   design:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'design') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'design')))
+    if: >-
+      needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'design') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'design')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'design')
+      )
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
@@ -344,6 +388,10 @@ jobs:
              If you disagree with a point, argue it in your answer instead of ignoring it.
           2. If the thread previously had the needs-info label and the questions are now answered, remove it: gh issue edit $ISSUE_NUMBER --remove-label needs-info
           3. Write the FINAL action plan for the developer. It must be self-contained: the developer only reads this comment, CLAUDE.md and specs/.
+          4. The developer starts as soon as you finish. If the plan is complete, move the issue to the next stage:
+             gh issue edit $ISSUE_NUMBER --remove-label design --add-label develop
+             If something still needs a person's decision, do NOT move it: ask in your answer (numbered questions with a default proposal)
+             and add the label instead: gh issue edit $ISSUE_NUMBER --add-label needs-info
 
           Your final answer is posted verbatim as the LAST comment of the issue, in the same language as the issue, titled
           "## Plan de acción para el desarrollador", with sections Contexto, Rama ($BRANCH), Specs de referencia, Ficheros (table: acción, ruta, contenido),
@@ -377,6 +425,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh issue comment "$ISSUE_NUMBER" --body-file /tmp/plan.md
 
+      # Safety net for step 4 of the final prompt, then hand over to
+      # develop. Never while a question is pending (needs-info).
+      - name: Move the issue to develop
+        if: steps.review.outputs.verdict != 'PREGUNTA'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx needs-info; then
+            gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label design 2>/dev/null || true
+            echo "A question is pending (needs-info); the issue stays in design."
+            exit 0
+          fi
+          gh label create develop --color fbca04 --description "Etapa develop: programador" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label design --add-label develop
+          gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=develop
+
       - name: Report failure
         if: failure()
         env:
@@ -393,7 +457,12 @@ jobs:
   # ---------------------------------------------------------------------
   develop:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'develop') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')))
+    if: >-
+      needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'develop') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'develop')
+      )
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
@@ -482,9 +551,19 @@ jobs:
             exit 0
           fi
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          [ -n "$PR" ] || exit 0
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')
+          if [ -z "$PR" ]; then
+            # Finished without a PR and without a question for a person:
+            # the pipeline would stall silently, so a person takes over.
+            if [ "$DEVELOPER_OUTCOME" = "success" ] && ! echo "$LABELS" | grep -qx needs-info; then
+              gh label create human-review --color d93f0b --description "Necesita revisión de una persona" 2>/dev/null || true
+              gh issue edit "$ISSUE_NUMBER" --add-label human-review
+              gh issue comment "$ISSUE_NUMBER" --body "Etapa develop: el programador ha terminado sin abrir la PR ni dejar una pregunta (\`needs-info\`). El issue pasa a \`human-review\`: una persona tiene que revisarlo. Para repetir la etapa, quita \`human-review\` y comenta en el issue."
+            fi
+            exit 0
+          fi
           if [ "$DEVELOPER_OUTCOME" != "success" ] && \
-             ! gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx pr-raised; then
+             ! echo "$LABELS" | grep -qx pr-raised; then
             echo "Developer step did not finish; the issue stays in develop."
             exit 0
           fi
@@ -790,7 +869,8 @@ jobs:
              Explain the fix needed for each one. Merge nothing.
 
           C) MERGE. Only if no global test is needed, or the integration issue is up to date with RESULTADO: SUPERADO.
-             1. Check EVERY PR before touching any: the last "Resultado del plan de pruebas" is SUPERADO for its current head, CI is green (gh pr checks <pr>),
+             1. Check EVERY PR before touching any: the last "Resultado del plan de pruebas" is SUPERADO for its current head, no CI check is failing
+                (gh pr checks <pr>; "no checks reported" is fine: pushes made by this pipeline do not trigger CI, and testPR is the gate),
                 it is mergeable (gh pr view <pr> --json mergeable,mergeStateStatus,baseRefName) against $DEFAULT_BRANCH, and the PRs fit specs/ and each other.
                 If any check fails, merge nothing: mark that issue with human-review as in B and explain why.
              2. Approve every PR: gh pr review <pr> --approve --body "Aprobada por el arquitecto en la etapa merge del módulo (#$ISSUE_NUMBER)."

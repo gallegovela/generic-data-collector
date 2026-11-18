@@ -50,6 +50,7 @@ La hace el arquitecto. Su comentario empieza con `VEREDICTO: APROBADO`, `CAMBIOS
 1. Aplica en `specs/` todos los cambios que pida el arquitecto y haz commit. Si no estás de acuerdo con algún punto, argumenta por qué en lugar de ignorarlo.
 2. Si el hilo tenía `needs-info` y las preguntas ya están respondidas, quita la etiqueta.
 3. Publica el **plan de acción para el desarrollador** con la plantilla de la skill `github-issues`, incluida la sección "Plan de pruebas" que enlaza a `test-plan.md`. Tiene que ser el **último comentario** del issue y bastar por sí solo: el programador solo leerá ese comentario, `CLAUDE.md` y `specs/`.
+4. Si el plan está completo, **pasa el issue a la etapa siguiente**: `gh issue edit <n> --remove-label design --add-label develop`. El programador empieza en ese momento. Si aún hace falta una decisión de una persona, no lo muevas: pregunta y añade `needs-info`.
 
 ## Etapa `testPR` (etiqueta `pr-raised`)
 
