@@ -28,16 +28,21 @@ npm run db:migrate
 
 ## Casos de prueba
 
-### PP-SUB-01 — Aislamiento por organización
+### PP-SUB-01 — Aislamiento por organización (listado, ficha, campos filtrables, estadísticas y búsqueda de texto)
 
-- **Cubre:** RNF-SUB-03 (filtro por `organizationId`, alcance general del módulo)
+- **Cubre:** RNF-SUB-03 (filtro por `organizationId` en las cuatro funciones de lectura del repositorio, alcance general del módulo)
 - **Tipo:** automático (Vitest)
-- **Precondiciones:** ninguna (el test crea sus propias dos organizaciones).
+- **Precondiciones:** ninguna (el test crea sus propias dos organizaciones, A y B, con el **mismo** `formId` en ambas —para forzar el cruce si el filtro fallara— y al menos una respuesta de A con GPS/`yes_no` y una palabra de texto libre que no existe en B).
 - **Pasos:**
   ```bash
   npx vitest run src/server/submissions/submission.repository.test.ts -t "organizacion"
   ```
-- **Resultado esperado:** código de salida 0; `findSubmissionById`/`listSubmissionsByForm` con el `organizationId` de la organización B no devuelven ninguna respuesta de la organización A, aunque el `id`/`formId` exista.
+- **Resultado esperado:** código de salida 0; consultando siempre con el `organizationId` de B pero con el `id`/`formId`/texto de A:
+  - `findSubmissionById(orgB, idDeA)` devuelve `null`.
+  - `listSubmissionsByForm(orgB, formIdDeA, {...})` devuelve `{ items: [], total: 0 }`.
+  - `findFilterableFields(orgB, formIdDeA)` devuelve `[]` (no los campos del `formVersionSnapshot` de A).
+  - `getSubmissionStats(orgB)` devuelve `{ today: 0, thisWeek: 0, byForm: [] }` aunque A tenga respuestas de hoy y de esta semana.
+  - buscar con `textQuery` una palabra que solo existe en una respuesta de A, con `organizationId` de B, no devuelve ningún `id` (`findSubmissionIdsByText`) ni ninguna fila en `listSubmissionsByForm` con ese filtro de texto.
 
 ### PP-SUB-02 — Copia inmutable del esquema en cada respuesta
 
@@ -175,3 +180,4 @@ docker compose down -v --remove-orphans
 ## Historial de cambios
 
 - 2026-11-18 — Plan de pruebas inicial (#7): PP-SUB-01 a PP-SUB-12 para el aislamiento por organización, la copia inmutable del esquema (RF-SUB-11), la paginación (CA-SUB-04), los filtros (CA-SUB-02, CA-SUB-08), la búsqueda de texto libre (CA-SUB-05), las estadísticas del panel de inicio (CA-SUB-06), el renderizado por tipo de campo, el mapa GPS (CA-SUB-03), fotos/firma y el carácter de solo lectura (CA-SUB-09, CA-SUB-07). RNF-SUB-02 y el aspecto visual quedan en comprobaciones manuales. CA-SUB-01 queda fuera (recepción real, no cubierta por #7).
+- 2026-11-18 — Revisión del arquitecto (#7, cambio bloqueante): PP-SUB-01 ampliado para que el aislamiento por `organizationId` cubra también `findFilterableFields`, `getSubmissionStats` y la búsqueda de texto (`findSubmissionIdsByText`), no solo `findSubmissionById`/`listSubmissionsByForm`.

@@ -326,7 +326,7 @@ sequenceDiagram
 | Criterio / Requisito | Tipo | Fichero |
 | --- | --- | --- |
 | RF-SUB-11 | Vitest | `src/server/submissions/submission.repository.test.ts` — `createSubmissionFixture` guarda `formVersionSnapshot` tal cual, sin mutarlo. |
-| — (filtro por organización) | Vitest | `src/server/submissions/submission.repository.test.ts` — `findSubmissionById`/`listSubmissionsByForm` con el `organizationId` de otra organización no devuelven las respuestas de la primera. |
+| — (filtro por organización, PP-SUB-01) | Vitest | `src/server/submissions/submission.repository.test.ts` — con el `organizationId` de la organización B pero el `id`/`formId`/texto de la organización A, `findSubmissionById`, `listSubmissionsByForm`, `findFilterableFields`, `getSubmissionStats` y la búsqueda de texto (`findSubmissionIdsByText`) no devuelven ningún dato de A. |
 | CA-SUB-04 | Vitest | `src/server/submissions/submission.repository.test.ts` — con 25 respuestas creadas, la página 1 devuelve 20 y `total: 25`; la página 2 devuelve las 5 restantes. |
 | CA-SUB-02 | Vitest | `src/server/submissions/submission.service.test.ts` — filtro `fieldId`/`fieldValue` sobre el campo `yes_no` "¿Hay incidencias?" de la fixture. |
 | CA-SUB-08 | Vitest | `src/server/submissions/submission.service.test.ts` — filtro combinado de rango de fechas y `submittedBy`. |
@@ -368,3 +368,4 @@ No se automatiza en #7: generar 10 000 filas realistas y medir el tiempo de carg
 ## Historial de cambios
 
 - 2026-11-18 — Diseño inicial (#7): `Submission` sin clave foránea a `Form`/`FormVersion` (identificador lógico `formId` + copia inmutable del esquema en `formVersionSnapshot`, RF-SUB-11); listado paginado y filtrable, ficha de detalle solo lectura y panel de inicio, todos como Server Components sin ninguna mutación; mapa con `leaflet`/`react-leaflet` (dependencia nueva, pendiente de aprobación); marcador de posición para fotos/firma mientras no exista `file-storage`; RNF-SUB-02 fuera del plan de pruebas automático (riesgo anotado).
+- 2026-11-18 — Revisión del arquitecto (#7, cambio bloqueante): la fila de "Tests" sobre el aislamiento por organización se amplía para cubrir también `findFilterableFields`, `getSubmissionStats` y la búsqueda de texto (`findSubmissionIdsByText`), no solo `findSubmissionById`/`listSubmissionsByForm` (ver PP-SUB-01 en `test-plan.md`).
