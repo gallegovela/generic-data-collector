@@ -44,6 +44,10 @@ const thresholds = {
 const windowNames = { five_hour: "ventana de 5 horas", seven_day: "semana" };
 const marker = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "usage-limit.md");
 
+// Self-hosted runners keep /tmp between runs: never leave an older answer
+// in place if this run ends without one.
+fs.writeFileSync(answerFile, "");
+
 let stopped = null; // { window, used, resetsAt, rejected }
 let answer = "";
 let answerIsError = false;

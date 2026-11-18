@@ -261,6 +261,9 @@ Pendientes de crear al inicializar el proyecto. Objetivo:
 
 ```bash
 docker compose up -d      # PostgreSQL, MinIO y Mailpit en local
+npm run test:stack:up     # entorno de pruebas en contenedores (rama + servicios), el que usa el pipeline
+npm run test:stack:run -- npm test   # cualquier comando dentro de ese entorno
+npm run test:stack:down   # lo borra todo
 npm run dev               # servidor de desarrollo
 npm run lint              # linter
 npm run typecheck         # comprobación de tipos

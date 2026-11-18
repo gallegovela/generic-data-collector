@@ -57,6 +57,13 @@ name: Issue pipeline
 # (the workflow dispatches develop), and so on until the module is merged
 # or an issue stops in `needs-info` or `human-review` for a person.
 #
+# develop, testPR and module-test run on the `ionos-l1-test` runner, whose
+# Docker daemon is a Docker-in-Docker sidecar isolated from the host (and
+# from the deployed demo). They test the branch in containers:
+# `npm run test:stack:up` builds and starts it (docker-compose.test.yml)
+# and every check runs inside its `tests` container through
+# `npm run test:stack:run -- <command>`. See specs/platform/design.md.
+#
 # Re-triggers on a human comment too (not just a fresh label), so
 # answering a question in the thread re-runs the *current* label's stage.
 # Comments and labels written by this workflow use GITHUB_TOKEN, which
@@ -463,7 +470,9 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')) ||
         (github.event_name == 'workflow_dispatch' && inputs.stage == 'develop')
       )
-    runs-on: ionos-l1-claude
+    runs-on: ionos-l1-test
+    env:
+      COMPOSE_PROJECT_NAME: formia-dev-${{ github.event.issue.number || inputs.issue }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -509,7 +518,14 @@ jobs:
           You are in the DEVELOP stage. Your job:
           1. Implement exactly what the plan says, with the tests it lists. Do not make design decisions: if the plan is incomplete or contradictory,
              explain what is missing in your answer, add the label (gh issue edit $ISSUE_NUMBER --add-label needs-info) and stop.
-          2. Run npm run lint, npm run typecheck and npm test (and npm run test:e2e if the change touches the demo path) once package.json defines them. Fix any failure.
+          2. Run npm run lint, npm run typecheck and npm test (and the e2e tests if the change touches the demo path). Fix any failure.
+             Tests that need PostgreSQL, MinIO or Mailpit, and the e2e tests, run in the containerised test stack, the same one testPR uses:
+               npm run test:stack:up                                  (builds the branch and starts web, postgres, minio, mailpit)
+               npm run test:stack:run -- npm test                     (any command, inside the stack's tests container)
+               npm run test:stack:run -- npx playwright test
+               npm run test:stack:logs -- web                         (logs of a service)
+             Run npm run test:stack:up again after changing code, so the images are rebuilt. There is no localhost database on this runner.
+             If scripts/test-stack.sh does not exist on $BRANCH, merge origin/$DEFAULT_BRANCH into it first (it is older than the test stack).
           3. Commit with Conventional Commits in English citing #$ISSUE_NUMBER, and push: git push -u origin $BRANCH
           4. When the task is ready (plan done, checks green), open the pull request against $DEFAULT_BRANCH, or update it if one already exists
              (gh pr list --head $BRANCH): gh pr create --base $DEFAULT_BRANCH --head $BRANCH --title "<conventional title> (#$ISSUE_NUMBER)" --body "..."
@@ -525,6 +541,11 @@ jobs:
           node "$RUNNER_TEMP/run-agent.mjs" /tmp/develop.md -p "$PROMPT" \
             --agent developer \
             --dangerously-skip-permissions
+
+      - name: Clean up the test stack
+        if: always()
+        run: |
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       - name: Push any remaining commits
         if: always()
@@ -590,7 +611,7 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'pr-raised')) ||
         (github.event_name == 'workflow_dispatch' && inputs.stage == 'test-pr')
       )
-    runs-on: ionos-l1-claude
+    runs-on: ionos-l1-test
     env:
       # Isolates the test stack from any other compose project on the
       # host (the deployed demo included), so `down -v` cannot touch it.
@@ -620,6 +641,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          rm -f /tmp/testpr.md
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           echo "number=$PR" >> "$GITHUB_OUTPUT"
           if [ -z "$PR" ]; then
@@ -627,10 +649,41 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare local environment file
-        run: cp -n .env.example .env || true
+      # Tests what the merge would produce: the PR branch plus the latest
+      # default branch (local only, never pushed). It also brings the test
+      # stack to branches created before it existed.
+      - name: Merge the latest default branch
+        id: base
+        run: |
+          git config user.name "Claude (automated)"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin "$DEFAULT_BRANCH"
+          if git merge --no-edit "origin/$DEFAULT_BRANCH"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            printf 'RESULTADO: FALLIDO\n## Resultado del plan de pruebas\n\nLa rama `%s` tiene conflictos con `%s`: el programador tiene que actualizarla. No se ejecuta el plan de pruebas.\n' "$BRANCH" "$DEFAULT_BRANCH" > /tmp/testpr.md
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start the test stack
+        id: stack
+        if: steps.base.outputs.ready == 'true'
+        run: |
+          if npm run test:stack:up > "$RUNNER_TEMP/stack-up.log" 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/stack-up.log"
+          {
+            printf 'RESULTADO: FALLIDO\n## Resultado del plan de pruebas\n\nNo se ha podido levantar el entorno de pruebas (`npm run test:stack:up`): falla la construcción de las imágenes de la rama o el arranque de algún servicio. No se ejecuta el plan de pruebas.\n\n<details><summary>Últimas líneas del log</summary>\n\n```\n'
+            tail -n 60 "$RUNNER_TEMP/stack-up.log"
+            printf '```\n\n</details>\n'
+          } > /tmp/testpr.md
+          echo "ready=false" >> "$GITHUB_OUTPUT"
 
       - name: Analyst - run the test plan
+        if: steps.stack.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -641,9 +694,15 @@ jobs:
           and the files it changes (git diff origin/$DEFAULT_BRANCH...HEAD --stat).
           Find the test plan: the "Plan de pruebas" section of the latest "Plan de acción para el desarrollador" comment points to specs/<module>/test-plan.md.
 
+          The workflow has already merged the latest $DEFAULT_BRANCH into the branch (locally) and started the test stack with npm run test:stack:up:
+          the branch's app (service web), PostgreSQL, MinIO and Mailpit run in containers. Every check and case runs inside the stack's tests container:
+            npm run test:stack:run -- <command>          e.g. npm run test:stack:run -- npm test
+            npm run test:stack:logs -- <service>         logs of web, postgres, minio or mailpit, to explain a failure
+          Nothing runs directly on this runner (there are no node_modules and no localhost services), and you must not stop the stack: the workflow does.
+
           You are in the TESTPR stage. Your job is to verify, before merging, that the pull request passes the test plan:
-          1. Run the "Preparación" steps, then every "Comprobaciones generales" check and every PP case that applies to this issue, exactly as written.
-             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          1. Skip the step of the "Preparación" that starts the stack (already done) and run the rest, then every "Comprobaciones generales" check
+             and every PP case that applies to this issue, exactly as written (inside the stack as above).
           2. For each case record the result: ✅ superado, ❌ fallido (with the relevant part of the output, never secrets or personal data) or ⏭️ no ejecutado (with the reason).
           3. Do not fix anything: do not edit files, commit, push, approve or merge. If a case fails, report it for the developer.
              If the test plan is missing, contradictory or cannot be run, report it for the analyst and the architect and answer BLOQUEADO.
@@ -659,8 +718,7 @@ jobs:
           ALLOWED=(
             "Read" "Grep" "Glob"
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)"
-            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
-            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(npm run test:stack:run:*)" "Bash(npm run test:stack:logs:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)"
           )
           node "$RUNNER_TEMP/run-agent.mjs" /tmp/testpr.md -p "$PROMPT" \
@@ -671,9 +729,7 @@ jobs:
       - name: Clean up the test stack
         if: always()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            docker compose down -v --remove-orphans || true
-          fi
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       # Only SUPERADO moves the issue to `merge`. Anything else (FALLIDO,
       # BLOQUEADO, a crash with no result line) goes to `human-review`.
@@ -961,7 +1017,7 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'module-test')) ||
         (github.event_name == 'workflow_dispatch' && inputs.stage == 'module-test')
       )
-    runs-on: ionos-l1-claude
+    runs-on: ionos-l1-test
     env:
       COMPOSE_PROJECT_NAME: formia-moduletest-${{ github.event.issue.number || inputs.issue }}
     steps:
@@ -1024,6 +1080,7 @@ jobs:
         env:
           BRANCHES: ${{ steps.module.outputs.branches }}
         run: |
+          rm -f /tmp/moduletest.md
           git fetch origin
           git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
           CONFLICTS=""
@@ -1037,10 +1094,25 @@ jobs:
           if [ -n "$CONFLICTS" ]; then
             printf 'RESULTADO: BLOQUEADO\n## Resultado de la prueba global del módulo\n\nNo se ha podido construir la rama `%s`: hay conflictos al fusionar%s sobre `%s` y lo ya fusionado. No se ejecutan las pruebas.\n' "$BRANCH" "$CONFLICTS" "$DEFAULT_BRANCH" > /tmp/moduletest.md
           fi
-          cp -n .env.example .env || true
+
+      - name: Start the test stack
+        id: stack
+        if: steps.build.outputs.conflicts == ''
+        run: |
+          if npm run test:stack:up > "$RUNNER_TEMP/stack-up.log" 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/stack-up.log"
+          {
+            printf 'RESULTADO: FALLIDO\n## Resultado de la prueba global del módulo\n\nNo se ha podido levantar el entorno de pruebas (`npm run test:stack:up`) con todas las PRs del módulo juntas. No se ejecutan las pruebas.\n\n<details><summary>Últimas líneas del log</summary>\n\n```\n'
+            tail -n 60 "$RUNNER_TEMP/stack-up.log"
+            printf '```\n\n</details>\n'
+          } > /tmp/moduletest.md
+          echo "ready=false" >> "$GITHUB_OUTPUT"
 
       - name: Analyst - write and run the global test plan
-        if: steps.build.outputs.conflicts == ''
+        if: steps.build.outputs.conflicts == '' && steps.stack.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           MODULES: ${{ steps.module.outputs.modules }}
@@ -1056,8 +1128,10 @@ jobs:
           1. Write or update the section "Pruebas globales del módulo" of specs/<module>/test-plan.md, following the test-plan skill: cases PP-<MOD>-M<N>
              that test the module's pieces TOGETHER, as the architect asks. Keep the change history citing #$ISSUE_NUMBER.
              Commit it on $BRANCH: git add specs/ && git commit -m "docs(<module>): add global module test plan (#$ISSUE_NUMBER)". Do not push.
-          2. Run the "Preparación", the "Comprobaciones generales" and every PP-<MOD>-M case, exactly as written, then the "Limpieza" even if something failed.
-             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          2. The workflow has already started the test stack (npm run test:stack:up) with this branch: app (service web), PostgreSQL, MinIO and Mailpit in containers.
+             Skip that step of the "Preparación", run the rest, the "Comprobaciones generales" and every PP-<MOD>-M case exactly as written, all inside
+             the stack's tests container: npm run test:stack:run -- <command>. Use npm run test:stack:logs -- <service> to explain a failure.
+             Nothing runs directly on this runner, and you must not stop the stack: the workflow does.
           3. Do not fix code: if something fails, say which PR or issue causes it, for the architect. Only specs/ may be edited.
 
           The FIRST line of your answer must be exactly one of: RESULTADO: SUPERADO | RESULTADO: FALLIDO | RESULTADO: BLOQUEADO
@@ -1069,8 +1143,7 @@ jobs:
             "Read" "Grep" "Glob"
             "Edit(specs/**)" "Write(specs/**)"
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
-            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
-            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(npm run test:stack:run:*)" "Bash(npm run test:stack:logs:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
           )
           node "$RUNNER_TEMP/run-agent.mjs" /tmp/moduletest.md -p "$PROMPT" \
@@ -1081,9 +1154,7 @@ jobs:
       - name: Clean up the test stack
         if: always()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            docker compose down -v --remove-orphans || true
-          fi
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       # The integration PR carries the global test plan into main. The
       # architect merges it last, after the module's PRs.
