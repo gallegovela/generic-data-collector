@@ -1,0 +1,19 @@
+# Imagen del contenedor `tests` de docker-compose.test.yml: el código de
+# la rama con las dependencias de desarrollo y Chromium (con sus librerías
+# de sistema) para Playwright. No se despliega nunca.
+#
+# Debian y no Alpine: Playwright necesita glibc. Los navegadores se
+# instalan con la versión de @playwright/test del lockfile, así que no hay
+# que mantener a mano la versión de la imagen.
+
+FROM node:22-bookworm
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+RUN npm ci && npx playwright install --with-deps chromium
+
+COPY . .
+
+ENV CI=true

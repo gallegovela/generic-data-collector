@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { connection, NextResponse } from "next/server";
 import { checkHealth } from "@/server/platform/health.service";
 
 /**
@@ -8,6 +8,10 @@ import { checkHealth } from "@/server/platform/health.service";
  * Cubre: RF-PLT-08, CA-PLT-04.
  */
 export async function GET(): Promise<Response> {
+  // Siempre en el momento de la petición: sin esto, Next.js intenta
+  // generarla al construir (Cache Components), sin variables de entorno
+  // ni servicios, y el build de la imagen falla.
+  await connection();
   const result = await checkHealth();
 
   return NextResponse.json(result, {
