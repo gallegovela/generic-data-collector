@@ -12,6 +12,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <a href="/admin" className="hover:underline">
             Panel
           </a>
+          <a href="/admin/forms" className="hover:underline">
+            Formularios
+          </a>
           <a href="/admin/users" className="hover:underline">
             Usuarios
           </a>
