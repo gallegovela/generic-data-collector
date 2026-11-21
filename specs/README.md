@@ -35,13 +35,8 @@ flowchart TD
 | Orden | Módulo | Prefijo | Resumen | Estado |
 | --- | --- | --- | --- | --- |
 | 1 | [platform](platform/README.md) | `PLT` | Proyecto base, docker-compose, comandos, CI y despliegue | diseñado |
-<<<<<<< HEAD
-| 2 | [tenancy-auth](tenancy-auth/README.md) | `AUT` | Organizaciones, usuarios, roles, inicio de sesión y aislamiento | borrador |
-| 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | diseñado |
-=======
 | 2 | [tenancy-auth](tenancy-auth/README.md) | `AUT` | Organizaciones, usuarios, roles, inicio de sesión y aislamiento | diseñado |
-| 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | borrador |
->>>>>>> origin/issue-4
+| 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | diseñado |
 | 4 | [theming](theming/README.md) | `THM` | Logo, colores y tipografía por organización | borrador |
 | 5 | [file-storage](file-storage/README.md) | `STO` | Fotos, firmas y logos en almacenamiento privado con URLs firmadas | borrador |
 | 6 | [field-collector](field-collector/README.md) | `COL` | PWA para rellenar formularios en el móvil, sin conexión, con foto, firma y GPS | borrador |
