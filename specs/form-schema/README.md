@@ -1,8 +1,9 @@
 # Esquema del formulario
 
 - **Prefijo:** `FSC`
-- **Estado:** borrador
+- **Estado:** diseñado
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
+- **Issues:** #1 (análisis), #5 (diseño)
 
 ## Objetivo
 
@@ -37,7 +38,19 @@ Definir, una sola vez y con Zod, el JSON versionado que describe un formulario (
 | `gps` | `{ lat, lng, accuracy, capturedAt }` | `autoCapture` |
 | `section` | (sin valor) | `title`, `description` |
 
-Todo campo tiene: `id` estable, `type`, `label`, `description?`, `required`, `visibleIf?`.
+Todo campo tiene: `id` estable, `type`, `label`, `description?`, `required`, `visibleIf?`. Las opciones propias de cada tipo (`multiline`, `min`, `options[]`…) se agrupan en una propiedad `config` del campo, para no confundirlas con `options[]` (la lista de opciones elegibles de `single_choice`/`multiple_choice`); ver [design.md](design.md#contratos).
+
+El campo `section` no añade ninguna propiedad propia: su `label` hace de título y su `description` de texto explicativo, los dos ya comunes a todo campo; `required` queda fijado a `false` porque no tiene respuesta.
+
+## Actores
+
+| Actor | Qué hace en este módulo |
+| --- | --- |
+| form-editor | Construye y valida un `FormVersion` mientras el administrador edita el formulario. |
+| ai-assistant | Genera un borrador de `FormVersion` y lo valida con este esquema antes de mostrarlo. |
+| field-collector | Renderiza los campos visibles y valida las respuestas con `validateSubmission` antes de guardarlas (en línea o en Dexie). |
+| form-publishing | Congela un `FormVersion` válido como versión publicada e inmutable. |
+| submissions-dashboard / outputs / public-api | Leen `FormVersion` y `Submission.answers` ya validados para mostrarlos, exportarlos o servirlos. |
 
 ## Requisitos funcionales
 
@@ -52,6 +65,7 @@ Todo campo tiene: `id` estable, `type`, `label`, `description?`, `required`, `vi
 | RF-FSC-07 | Must | El esquema rechaza referencias condicionales a campos inexistentes, posteriores o circulares, e ids duplicados. |
 | RF-FSC-08 | Should | Existen migraciones del formato para leer esquemas guardados con un `schemaVersion` anterior. |
 | RF-FSC-09 | Should | Se exporta un JSON Schema equivalente para usarlo como formato de salida de la IA. |
+| RF-FSC-10 | Must | Cada opción de `single_choice`/`multiple_choice` tiene un `id` estable, independiente de su `label`, por el mismo motivo que RF-FSC-04 para los campos. |
 
 ## Requisitos no funcionales
 
@@ -59,6 +73,10 @@ Todo campo tiene: `id` estable, `type`, `label`, `description?`, `required`, `vi
 | --- | --- | --- |
 | RNF-FSC-01 | Must | El módulo no depende de ningún otro módulo ni hace E/S. |
 | RNF-FSC-02 | Must | Cobertura de tests de al menos el 90 % de líneas; todo cambio del esquema va con tests (regla de `CLAUDE.md`). |
+
+## Flujos principales
+
+No aplica: `form-schema` no tiene flujos de usuario propios, es una librería pura sin interfaz. Los dos únicos flujos relevantes (validar un `FormVersion` al guardarlo y validar una `Submission` al enviarla) están documentados como diagramas de secuencia en [design.md](design.md#flujos).
 
 ## Datos
 
@@ -74,7 +92,20 @@ Todo campo tiene: `id` estable, `type`, `label`, `description?`, `required`, `vi
 - **CA-FSC-02** — Dado un campo obligatorio oculto por la lógica condicional, cuando se valida una respuesta sin él, entonces la respuesta es válida.
 - **CA-FSC-03** — Dado un campo `number` con `max: 10`, cuando la respuesta trae `11`, entonces la validación falla en ese campo.
 - **CA-FSC-04** — Dados los tres formularios del seed, cuando se validan, entonces son válidos.
+- **CA-FSC-05** — Dado un `visibleIf` que referencia un campo inexistente, posterior en el orden o a sí mismo, cuando se valida el `FormVersion`, entonces falla indicando el `id` del campo problemático.
+- **CA-FSC-06** — Dado un campo `multiple_choice` respondido con una opción marcada, cuando otro campo tiene `visibleIf: { operator: "includes", value: <esa opción> }`, entonces ese campo se considera visible; si la opción no está marcada, se considera oculto.
+- **CA-FSC-07** — Dado un campo sin responder, cuando otro campo tiene `visibleIf: { operator: "isAnswered" }` sobre él, entonces se considera oculto; en cuanto se responde (con un valor no vacío), se considera visible.
+- **CA-FSC-08** — Dada una respuesta antigua que apunta al `id` de una opción de `single_choice`, cuando se cambia el `label` de esa opción sin cambiar su `id`, entonces la respuesta sigue siendo válida.
+
+## Supuestos y preguntas abiertas
+
+- **Fixtures en lugar del seed real** — `demo-seed` todavía no existe (sin issue ni módulo diseñado): CA-FSC-04 se verifica con tres `FormVersion` de muestra definidos como *fixtures* dentro de este módulo (`src/lib/form-schema/fixtures/`), que representan el parte de obra, la encuesta de satisfacción y el alta de cliente de `CLAUDE.md`. Cuando se diseñe `demo-seed`, debería reutilizar estos fixtures en vez de redefinir los formularios.
+- **Referencia al tema (RF-FSC-02)** — `theming` todavía no tiene issue. Para no incumplir RNF-FSC-01 (ninguna dependencia de otro módulo), `FormVersion.theme` es un `ThemeSnapshotSchema` mínimo (colores, tipografía, referencia al logo) definido dentro de este propio módulo. Cuando se diseñe `theming`, su analista decidirá si esta forma le vale tal cual o si hay que ampliarla (sería un cambio de contrato entre módulos, a avisar en ese issue).
+- **Referencias a ficheros (`photo`, `signature`)** — `FileRef` guarda solo la referencia de almacenamiento (`key` y metadatos), nunca una URL firmada (que es de corta duración, ver RGPD en `CLAUDE.md`). `file-storage`, cuando se diseñe, deberá producir y consumir objetos con esta misma forma.
+- **Cobertura de tests (RNF-FSC-02)** — Se automatiza con `@vitest/coverage-v8` y un umbral del 90 % en `vitest.config.ts` limitado a `include: ["src/lib/form-schema/**"]` (decidido con el arquitecto en el issue #5; ver `design.md#cobertura-rnf-fsc-02`). Cuando otro módulo necesite medir su propia cobertura, su analista tendrá que ampliar ese `include` o pasar a una configuración por módulo: queda anotado aquí como riesgo a revisar en ese momento.
 
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
+- 2026-11-17 — Diseño técnico (#5): esquema Zod completo (tipos de campo, lógica condicional, validación de respuestas); añadidas las secciones "Actores", "Flujos principales" y "Supuestos y preguntas abiertas"; añadido RF-FSC-10 (id estable de opción) y CA-FSC-05 a CA-FSC-08 (referencias de condición inválidas, operadores de visibilidad, estabilidad de id de opción), no enumerados explícitamente en el issue pero necesarios para cubrir RF-FSC-05 y RF-FSC-07 por completo; aclarado que `config` agrupa las opciones propias de cada tipo de campo y que `section` reutiliza `label`/`description`.
+- 2026-11-17 — Revisión del arquitecto aplicada (#5): la cobertura de RNF-FSC-02 se automatiza con `@vitest/coverage-v8` en vez de quedar como comprobación manual.
