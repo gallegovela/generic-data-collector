@@ -1,6 +1,7 @@
-// prisma/schema.prisma — solo los bloques base; sin modelos todavía
-// Cada módulo posterior (tenancy-auth, etc.) añade sus propios modelos
-// y su propia migración.
+// prisma/schema.prisma
+// Cada módulo añade sus propios modelos y su propia migración.
+// tenancy-auth (#4) añade la primera migración de negocio: Organization,
+// User, Invitation, LoginToken (ver specs/tenancy-auth/design.md).
 
 datasource db {
   provider = "postgresql"
@@ -9,4 +10,75 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+}
+
+enum Role {
+  admin
+  collector
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  invitations Invitation[]
+
+  @@map("organizations")
+}
+
+model User {
+  id             String     @id @default(cuid())
+  organizationId String
+  email          String     @unique
+  name           String
+  passwordHash   String
+  role           Role
+  status         UserStatus @default(active)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  loginTokens  LoginToken[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Invitation {
+  id              String    @id @default(cuid())
+  organizationId  String
+  email           String
+  role            Role
+  token           String    @unique
+  invitedByUserId String
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@index([organizationId])
+  @@map("invitations")
+}
+
+model LoginToken {
+  id        String    @id @default(cuid())
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("login_tokens")
 }

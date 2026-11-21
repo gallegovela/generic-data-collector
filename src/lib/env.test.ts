@@ -11,6 +11,11 @@ const validEnv = {
   S3_SECRET_KEY: "minioadmin",
   S3_BUCKET: "formia",
   S3_FORCE_PATH_STYLE: "true",
+  AUTH_SECRET: "a".repeat(32),
+  AUTH_URL: "http://localhost:3000",
+  SMTP_HOST: "localhost",
+  SMTP_PORT: "1025",
+  SMTP_FROM: "no-reply@formia.local",
 } satisfies NodeJS.ProcessEnv;
 
 function withoutKeys<T extends object, K extends keyof T>(
@@ -39,6 +44,13 @@ describe("loadEnv", () => {
       S3_SECRET_KEY: "minioadmin",
       S3_BUCKET: "formia",
       S3_FORCE_PATH_STYLE: true,
+      AUTH_SECRET: "a".repeat(32),
+      AUTH_URL: "http://localhost:3000",
+      SMTP_HOST: "localhost",
+      SMTP_PORT: 1025,
+      SMTP_FROM: "no-reply@formia.local",
+      SMTP_USER: undefined,
+      SMTP_PASSWORD: undefined,
     });
   });
 
@@ -55,12 +67,23 @@ describe("loadEnv", () => {
     expect(() => loadEnv(invalid)).toThrowError(/^(?!.*secret-value).*DATABASE_URL.*$/);
   });
 
+  // Cubre: RNF-AUT-02 (ningún secreto en el mensaje de error)
+  it("lanza un error cuando AUTH_SECRET tiene menos de 32 caracteres", () => {
+    const invalid = { ...validEnv, AUTH_SECRET: "demasiado-corto" };
+
+    expect(() => loadEnv(invalid)).toThrowError(/AUTH_SECRET/);
+  });
+
   it("aplica los valores por defecto cuando no se indican", () => {
     const rest = withoutKeys(validEnv, [
       "NODE_ENV",
       "PORT",
       "S3_REGION",
       "S3_FORCE_PATH_STYLE",
+      "AUTH_URL",
+      "SMTP_HOST",
+      "SMTP_PORT",
+      "SMTP_FROM",
     ]);
 
     const env = loadEnv(rest);
@@ -69,5 +92,9 @@ describe("loadEnv", () => {
     expect(env.PORT).toBe(3000);
     expect(env.S3_REGION).toBe("eu-west-1");
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);
+    expect(env.AUTH_URL).toBe("http://localhost:3000");
+    expect(env.SMTP_HOST).toBe("localhost");
+    expect(env.SMTP_PORT).toBe(1025);
+    expect(env.SMTP_FROM).toBe("no-reply@formia.local");
   });
 });
