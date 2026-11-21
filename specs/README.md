@@ -35,12 +35,12 @@ flowchart TD
 | Orden | Módulo | Prefijo | Resumen | Estado |
 | --- | --- | --- | --- | --- |
 | 1 | [platform](platform/README.md) | `PLT` | Proyecto base, docker-compose, comandos, CI y despliegue | diseñado |
-| 2 | [tenancy-auth](tenancy-auth/README.md) | `AUT` | Organizaciones, usuarios, roles, inicio de sesión y aislamiento | borrador |
+| 2 | [tenancy-auth](tenancy-auth/README.md) | `AUT` | Organizaciones, usuarios, roles, inicio de sesión y aislamiento | diseñado |
 | 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | diseñado |
 | 4 | [theming](theming/README.md) | `THM` | Logo, colores y tipografía por organización | borrador |
 | 5 | [file-storage](file-storage/README.md) | `STO` | Fotos, firmas y logos en almacenamiento privado con URLs firmadas | borrador |
 | 6 | [field-collector](field-collector/README.md) | `COL` | PWA para rellenar formularios en el móvil, sin conexión, con foto, firma y GPS | borrador |
-| 7 | [form-editor](form-editor/README.md) | `EDT` | Editor visual con arrastrar y soltar | borrador |
+| 7 | [form-editor](form-editor/README.md) | `EDT` | Editor visual con arrastrar y soltar | diseñado |
 | 8 | [form-publishing](form-publishing/README.md) | `PUB` | Publicación, versiones, enlace y código QR | borrador |
 | 9 | [ai-assistant](ai-assistant/README.md) | `AI` | Creación y modificación de formularios con IA a partir de texto o foto | borrador |
 | 10 | [submissions-dashboard](submissions-dashboard/README.md) | `SUB` | Recepción de respuestas, listado, ficha y filtros | borrador |
