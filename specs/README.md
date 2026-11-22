@@ -43,7 +43,7 @@ flowchart TD
 | 7 | [form-editor](form-editor/README.md) | `EDT` | Editor visual con arrastrar y soltar | borrador |
 | 8 | [form-publishing](form-publishing/README.md) | `PUB` | Publicación, versiones, enlace y código QR | borrador |
 | 9 | [ai-assistant](ai-assistant/README.md) | `AI` | Creación y modificación de formularios con IA a partir de texto o foto | borrador |
-| 10 | [submissions-dashboard](submissions-dashboard/README.md) | `SUB` | Recepción de respuestas, listado, ficha y filtros | borrador |
+| 10 | [submissions-dashboard](submissions-dashboard/README.md) | `SUB` | Recepción de respuestas, listado, ficha y filtros | diseñado |
 | 11 | [outputs](outputs/README.md) | `OUT` | Email con PDF, Excel, CSV y webhooks | borrador |
 | 12 | [public-api](public-api/README.md) | `API` | API REST de solo lectura con claves por organización | borrador |
 | 13 | [privacy-gdpr](privacy-gdpr/README.md) | `GDPR` | RGPD transversal: logs, retención, exportación y borrado de una organización | borrador |
