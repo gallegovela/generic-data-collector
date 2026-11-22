@@ -31,8 +31,8 @@ En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`
 | Etiqueta | Uso | La pone |
 | --- | --- | --- |
 | `analysis` | Etapa 1: la procesa el **architect** | Una persona |
-| `design` | Etapa 2: la procesa el **analyst-programmer**, revisado por el architect | Una persona, al aprobar un issue hijo |
-| `develop` | Etapa 3: la procesa el **developer** | Una persona, al aprobar el plan de acción |
+| `design` | Etapa 2: la procesa el **analyst-programmer**, revisado por el architect | El architect, al crear el issue hijo |
+| `develop` | Etapa 3: la procesa el **developer** | El analyst-programmer, al publicar el plan de acción final (cambia `design` por `develop`) |
 | `pr-raised` | Etapa 4, `testPR`: la procesa el **analyst-programmer**, que ejecuta el plan de pruebas sobre la PR | El **developer**, al abrir la PR (quitando `develop`); o una persona, para repetir las pruebas |
 | `merge` | Etapa 5: la procesa el **architect** cuando **todos** los issues abiertos del módulo están listos: pide una prueba global o aprueba y fusiona todas sus PRs en un solo paso | El workflow, cuando `testPR` da `SUPERADO`; o una persona, para dar una PR por buena |
 | `module-test` | Etapa 6, en un issue `integration`: la procesa el **analyst-programmer**, que prueba juntas todas las PRs del módulo | El workflow, cuando el architect pide una prueba global; o una persona, para repetirla |
@@ -42,7 +42,7 @@ En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`
 | `human-review` | Pruebas no superadas (`FALLIDO`, `BLOQUEADO`), PR que no se puede fusionar o culpable de una prueba global fallida. Bloquea la etapa `merge` de todo el módulo | El workflow (tras `testPR`) o el architect (en `merge`); la quita una persona |
 | `module:<modulo>` | Módulo de `specs/` afectado | El architect |
 
-Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisión humana. Las excepciones: de `develop` a `pr-raised` (el developer, al abrir la PR), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de `testPR`) de `merge` a `human-review` (el architect), y el ciclo de la prueba global (`integration` lo crea el architect; `module-test` y `module-test-done` los pone el workflow). Un módulo bloquea su fusión mientras tenga algún issue abierto que no esté listo, **incluidos los que aún no han empezado**. Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
+Después de `analysis`, que pone una persona, el recorrido es automático hasta la fusión del módulo o hasta que un issue se detiene en `needs-info` o `human-review`. Los cambios de etapa: el architect crea los hijos con `design`; de `design` a `develop` (el analyst-programmer, al publicar el plan final sin preguntas pendientes); de `develop` a `pr-raised` (el developer, al abrir la PR), de `pr-raised` a `merge` o `human-review` (el workflow, según el resultado de `testPR`) de `merge` a `human-review` (el architect), y el ciclo de la prueba global (`integration` lo crea el architect; `module-test` y `module-test-done` los pone el workflow). Un módulo bloquea su fusión mientras tenga algún issue abierto que no esté listo, **incluidos los que aún no han empezado**. Responder con un comentario en el issue vuelve a ejecutar la etapa de la etiqueta actual.
 
 ## Enlaces
 
@@ -64,7 +64,7 @@ Los agentes no ponen etiquetas de etapa: pasar de una etapa a otra es una decisi
 <contexto, ejemplos, enlaces>
 ```
 
-## Plantilla: issue de diseño (lo crea el architect; una persona le pone `design`)
+## Plantilla: issue de diseño (lo crea el architect con las etiquetas `design` y `module:<modulo>`)
 
 ```markdown
 Padre: #<n>

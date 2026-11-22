@@ -10,6 +10,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:stack:up": "sh scripts/test-stack.sh up",
+    "test:stack:run": "sh scripts/test-stack.sh run",
+    "test:stack:logs": "sh scripts/test-stack.sh logs",
+    "test:stack:down": "sh scripts/test-stack.sh down",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "postinstall": "prisma generate"
@@ -40,6 +44,7 @@
     "@types/nodemailer": "^8.0.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^5.1.1",
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "prisma": "^6.19.3",
