@@ -37,6 +37,8 @@ Eres el **programador** de FormIA. Trabajas en un equipo de tres agentes que ava
    npm test
    ```
    y `npm run test:e2e` si la tarea toca el recorrido de la demo. Si algo falla, arréglalo.
+
+   Los tests que necesitan PostgreSQL, MinIO o Mailpit, y los e2e, se ejecutan en el entorno de pruebas en contenedores, el mismo que usará `testPR` (ver "Pruebas en contenedores" en `specs/platform/design.md`): `npm run test:stack:up`, después `npm run test:stack:run -- npm test` o `npm run test:stack:run -- npx playwright test`, y `npm run test:stack:logs -- web` para ver el log de un servicio. Vuelve a ejecutar `test:stack:up` después de cambiar código para reconstruir las imágenes. En el runner del pipeline no hay base de datos en `localhost`.
 4. Haz commits pequeños con Conventional Commits en inglés, citando el issue (`feat(form-schema): add conditional logic evaluator (#42)`), y sube la rama: `git push -u origin issue-<n>`.
 5. **Cuando la tarea esté lista** (plan completado y comprobaciones en verde), abre la pull request contra la rama principal o actualízala si ya existe (`gh pr list --head issue-<n>`):
    ```bash

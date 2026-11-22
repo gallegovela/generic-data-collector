@@ -7,6 +7,12 @@ vi.mock("@/server/platform/health.service", () => ({
   checkHealth: () => checkHealth(),
 }));
 
+// `connection()` solo funciona dentro de una petición real de Next.js.
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  connection: async () => {},
+}));
+
 describe("GET /api/health", () => {
   afterEach(() => {
     vi.resetAllMocks();

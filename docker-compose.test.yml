@@ -1,0 +1,94 @@
+# Entorno de pruebas en contenedores: la rama completa (app de producción `web`
+# + PostgreSQL, MinIO y Mailpit) y un contenedor `tests` con el código y
+# las dependencias de desarrollo, todo en la misma red de Docker. Las
+# pruebas se ejecutan dentro de `tests` y llegan a los servicios por su
+# nombre (postgres, minio, mailpit, web), nunca por localhost.
+#
+# No se usa directamente: scripts/test-stack.sh (npm run test:stack:*)
+# lo combina con docker-compose.yml y aísla cada ejecución con
+# COMPOSE_PROJECT_NAME. Ver "Pruebas en contenedores" en
+# specs/platform/design.md.
+#
+# Sin puertos publicados (`!reset`, Compose >= 2.24.4): varias ramas se
+# pueden probar a la vez en el mismo Docker sin chocar.
+#
+# Las variables salen de .env.example (sin secretos). Las que apuntan a
+# localhost se sustituyen aquí por el nombre del servicio: cada módulo que
+# añada a .env.example una variable de ese tipo la añade también aquí.
+
+x-test-env: &test-env
+  DATABASE_URL: postgresql://formia:formia@postgres:5432/formia
+  S3_ENDPOINT: http://minio:9000
+  S3_ACCESS_KEY: minioadmin
+  S3_SECRET_KEY: minioadmin
+  S3_FORCE_PATH_STYLE: "true"
+
+services:
+  postgres:
+    ports: !reset []
+
+  minio:
+    ports: !reset []
+
+  mailpit:
+    ports: !reset []
+
+  # Crea el bucket de .env.example (formia) para las pruebas que suben
+  # archivos. Se ejecuta una vez con `run`. Usa la misma imagen que el
+  # servicio minio (que trae `mc`), para no depender de otra imagen:
+  # MinIO ya no publica sus imágenes en Docker Hub ni en quay.io, y en el
+  # runner se cargan a mano (ver "Pruebas en contenedores" en
+  # specs/platform/design.md).
+  minio-init:
+    image: minio/minio:latest
+    profiles: ["tests"]
+    depends_on:
+      - minio
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null 2>&1; do sleep 1; done
+        mc mb --ignore-existing local/formia
+
+  # La imagen de producción construida desde la rama: la que prueban
+  # Playwright (E2E_BASE_URL) y los casos con curl. Se llama `web` y no
+  # `app` porque Chromium fuerza HTTPS en `.app` (dominio en su lista HSTS).
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: ["tests"]
+    env_file:
+      - .env.example
+    environment:
+      <<: *test-env
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  # Código de la rama con las dependencias de desarrollo y Chromium para
+  # Playwright. Ejecuta lint, typecheck, Vitest, el build y los tests e2e.
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    profiles: ["tests"]
+    env_file:
+      - .env.example
+    environment:
+      <<: *test-env
+      E2E_BASE_URL: http://web:3000
+      CI: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy

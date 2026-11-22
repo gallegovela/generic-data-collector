@@ -4,7 +4,13 @@ name: Issue pipeline
 # ionosL1 self-hosted runner as one of the project agents defined in
 # .claude/agents/ (see CLAUDE.md, "Agentes y flujo de trabajo").
 # Authenticated via CLAUDE_CODE_OAUTH_TOKEN (a long-lived token from
-# `claude setup-token`, stored as an organization secret).
+# `claude setup-token`, stored as an organization secret), so agents use
+# the Claude subscription. Every agent runs through
+# .github/scripts/run-agent.mjs, which stops it when the subscription's
+# 5-hour or weekly usage reaches AGENT_MAX_FIVE_HOUR_PCT /
+# AGENT_MAX_SEVEN_DAY_PCT (repository variables, default 90). A stopped
+# stage posts a note with the reset time, keeps the issue's label and does
+# not hand over; a comment on the issue re-runs it.
 #
 # analysis -> architect. Reviews the request against the whole project,
 #             argues the architecture, points out errors and improvements,
@@ -45,6 +51,19 @@ name: Issue pipeline
 #             opens the integration PR, sets `module-test-done` and hands
 #             back to the merge stage, where the architect analyses it.
 #
+# After analysis the pipeline runs on its own: the architect creates the
+# children with `design` (the workflow dispatches their design stage),
+# the analyst swaps `design` for `develop` once the final plan is posted
+# (the workflow dispatches develop), and so on until the module is merged
+# or an issue stops in `needs-info` or `human-review` for a person.
+#
+# develop, testPR and module-test run on the `ionos-l1-test` runner, whose
+# Docker daemon is a Docker-in-Docker sidecar isolated from the host (and
+# from the deployed demo). They test the branch in containers:
+# `npm run test:stack:up` builds and starts it (docker-compose.test.yml)
+# and every check runs inside its `tests` container through
+# `npm run test:stack:run -- <command>`. See specs/platform/design.md.
+#
 # Re-triggers on a human comment too (not just a fresh label), so
 # answering a question in the thread re-runs the *current* label's stage.
 # Comments and labels written by this workflow use GITHUB_TOKEN, which
@@ -79,7 +98,7 @@ on:
         description: Etapa a ejecutar
         required: true
         type: choice
-        options: [test-pr, merge, module-test]
+        options: [design, develop, test-pr, merge, module-test]
 
 permissions:
   actions: write        # gh workflow run: hand-overs between stages and deploy.yml
@@ -98,6 +117,10 @@ env:
   ISSUE_NUMBER: ${{ github.event.issue.number || inputs.issue }}
   BRANCH: issue-${{ github.event.issue.number || inputs.issue }}
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  # Subscription usage (percent) at which an agent is stopped, for the
+  # 5-hour and the weekly window. See .github/scripts/run-agent.mjs.
+  AGENT_MAX_FIVE_HOUR_PCT: ${{ vars.AGENT_MAX_FIVE_HOUR_PCT || 90 }}
+  AGENT_MAX_SEVEN_DAY_PCT: ${{ vars.AGENT_MAX_SEVEN_DAY_PCT || 90 }}
 
 jobs:
   check-permission:
@@ -137,6 +160,29 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
+
+      # Children are found through "Padre: #<n>" in their body, with the
+      # list API (the search API lags behind newly created issues).
+      - name: Remember the existing child issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue list --state all --limit 500 --json number,body \
+            --jq "[.[] | select(.body | test(\"Padre: #$ISSUE_NUMBER\\\\b\")) | .number]" > "$RUNNER_TEMP/children-before.json"
+
       - name: Architect - analysis
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,8 +200,11 @@ jobs:
              gh issue edit $ISSUE_NUMBER --add-label needs-info
              and do NOT create child issues yet. If the thread already answers your previous questions, remove needs-info and continue.
           5. Otherwise create one child issue per development piece (normally one per module affected), following the "design" issue template of the github-issues skill,
-             with gh issue create --title "..." --body "..." --label "module:<module>" (create a missing label with gh label create).
-             Pass the body inline with --body; do not use pipes, heredocs or temporary files. Do NOT add the design label: a human adds it to approve each child.
+             with gh issue create --title "..." --body "..." --label design --label "module:<module>" (create a missing label with gh label create).
+             The body must contain the line "Padre: #$ISSUE_NUMBER". Pass the body inline with --body; do not use pipes, heredocs or temporary files.
+             The design label starts the analyst's design stage right away, so only create a child when its piece is fully decided.
+             Pieces of the same module are merged together in one single step, so each one must be developable from $DEFAULT_BRANCH on its own:
+             do not make a piece depend on another unmerged piece of the same module (merge them into one child instead).
              Do not duplicate children that already exist; update them with gh issue edit instead.
           6. Update the task list of issue #$ISSUE_NUMBER with its children (gh issue edit $ISSUE_NUMBER --body "...", keeping the original text).
           You must not modify any file in the repository.
@@ -170,13 +219,10 @@ jobs:
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue create:*)" "Bash(gh issue edit:*)"
             "Bash(gh label list:*)" "Bash(gh label create:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/analysis.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 3 \
-            > /tmp/analysis.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Post result comment
         if: always()
@@ -186,17 +232,57 @@ jobs:
           [ -s /tmp/analysis.md ] || echo "⚠️ La etapa de análisis ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/analysis.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/analysis.md
 
+      # Labels set with GITHUB_TOKEN do not trigger runs, so the design
+      # stage of every child created in this run is dispatched here. Only
+      # new open children: the ones that existed before are already in
+      # their own stage. Nothing starts while the parent waits for answers.
+      - name: Start the design stage of the new children
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx needs-info; then
+            echo "The parent is waiting in needs-info; no child starts."
+            exit 0
+          fi
+          gh label create design --color d73a4a --description "Etapa design: analista programador" 2>/dev/null || true
+          NEW=$(gh issue list --state open --limit 500 --json number,body \
+            --jq "[.[] | select(.body | test(\"Padre: #$ISSUE_NUMBER\\\\b\")) | .number] - $(cat "$RUNNER_TEMP/children-before.json") | .[]")
+          for CHILD in $NEW; do
+            gh issue edit "$CHILD" --add-label design
+            gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$CHILD" -f stage=design
+            echo "Design stage dispatched for #$CHILD"
+          done
+
   # ---------------------------------------------------------------------
   # Stage 2: design (analyst-programmer, supervised by the architect)
   # ---------------------------------------------------------------------
   design:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'design') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'design')))
+    if: >-
+      needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'design') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'design')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'design')
+      )
     runs-on: ionos-l1-claude
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Configure git remote and identity
         env:
@@ -243,13 +329,10 @@ jobs:
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/draft.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/draft.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Post draft comment
         env:
@@ -285,13 +368,10 @@ jobs:
             "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/review.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 2 \
-            > /tmp/review.md
+            --allowedTools "${ALLOWED[@]}"
           VERDICT=$(grep -oE 'VEREDICTO: (APROBADO|CAMBIOS|PREGUNTA)' /tmp/review.md | head -1 | cut -d' ' -f2)
           echo "verdict=${VERDICT:-CAMBIOS}" >> "$GITHUB_OUTPUT"
 
@@ -315,6 +395,10 @@ jobs:
              If you disagree with a point, argue it in your answer instead of ignoring it.
           2. If the thread previously had the needs-info label and the questions are now answered, remove it: gh issue edit $ISSUE_NUMBER --remove-label needs-info
           3. Write the FINAL action plan for the developer. It must be self-contained: the developer only reads this comment, CLAUDE.md and specs/.
+          4. The developer starts as soon as you finish. If the plan is complete, move the issue to the next stage:
+             gh issue edit $ISSUE_NUMBER --remove-label design --add-label develop
+             If something still needs a person's decision, do NOT move it: ask in your answer (numbered questions with a default proposal)
+             and add the label instead: gh issue edit $ISSUE_NUMBER --add-label needs-info
 
           Your final answer is posted verbatim as the LAST comment of the issue, in the same language as the issue, titled
           "## Plan de acción para el desarrollador", with sections Contexto, Rama ($BRANCH), Specs de referencia, Ficheros (table: acción, ruta, contenido),
@@ -328,13 +412,10 @@ jobs:
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
             "Bash(gh issue view:*)" "Bash(gh issue edit:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/plan.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 3 \
-            > /tmp/plan.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Push the issue branch
         if: always()
@@ -351,20 +432,47 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh issue comment "$ISSUE_NUMBER" --body-file /tmp/plan.md
 
+      # Safety net for step 4 of the final prompt, then hand over to
+      # develop. Never while a question is pending (needs-info).
+      - name: Move the issue to develop
+        if: steps.review.outputs.verdict != 'PREGUNTA'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qx needs-info; then
+            gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label design 2>/dev/null || true
+            echo "A question is pending (needs-info); the issue stays in design."
+            exit 0
+          fi
+          gh label create develop --color fbca04 --description "Etapa develop: programador" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --remove-label design --add-label develop
+          gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=develop
+
       - name: Report failure
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+          else
+            gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          fi
 
   # ---------------------------------------------------------------------
   # Stage 3: develop (developer)
   # ---------------------------------------------------------------------
   develop:
     needs: check-permission
-    if: needs.check-permission.outputs.allowed == 'true' && ((github.event_name == 'issues' && github.event.label.name == 'develop') || (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')))
-    runs-on: ionos-l1-claude
+    if: >-
+      needs.check-permission.outputs.allowed == 'true' && (
+        (github.event_name == 'issues' && github.event.label.name == 'develop') ||
+        (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'develop')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.stage == 'develop')
+      )
+    runs-on: ionos-l1-test
+    env:
+      COMPOSE_PROJECT_NAME: formia-dev-${{ github.event.issue.number || inputs.issue }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -375,6 +483,16 @@ jobs:
         with:
           node-version: 22
 
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
+
       - name: Configure git remote and identity
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -384,6 +502,7 @@ jobs:
           git config user.email "noreply@anthropic.com"
 
       - name: Developer - implement and open PR
+        id: developer
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -392,11 +511,21 @@ jobs:
           Read CLAUDE.md in full. You are on branch $BRANCH, which already holds the specs/ changes for issue #$ISSUE_NUMBER.
           Read the issue and its whole thread (gh issue view $ISSUE_NUMBER --comments). The comment titled "Plan de acción para el desarrollador"
           (the latest one, if there are several) is your work order; follow it together with the specs/ it references.
+          If a pull request from $BRANCH already exists (gh pr list --head $BRANCH), read its conversation too (gh pr view <pr> --comments):
+          the "Resultado del plan de pruebas" comments from testPR tell you what failed. Fix what is caused by the code; if a failure comes
+          from the test plan or specs/ themselves, do not change them: explain it in your answer.
 
           You are in the DEVELOP stage. Your job:
           1. Implement exactly what the plan says, with the tests it lists. Do not make design decisions: if the plan is incomplete or contradictory,
              explain what is missing in your answer, add the label (gh issue edit $ISSUE_NUMBER --add-label needs-info) and stop.
-          2. Run npm run lint, npm run typecheck and npm test (and npm run test:e2e if the change touches the demo path) once package.json defines them. Fix any failure.
+          2. Run npm run lint, npm run typecheck and npm test (and the e2e tests if the change touches the demo path). Fix any failure.
+             Tests that need PostgreSQL, MinIO or Mailpit, and the e2e tests, run in the containerised test stack, the same one testPR uses:
+               npm run test:stack:up                                  (builds the branch and starts web, postgres, minio, mailpit)
+               npm run test:stack:run -- npm test                     (any command, inside the stack's tests container)
+               npm run test:stack:run -- npx playwright test
+               npm run test:stack:logs -- web                         (logs of a service)
+             Run npm run test:stack:up again after changing code, so the images are rebuilt. There is no localhost database on this runner.
+             If scripts/test-stack.sh does not exist on $BRANCH, merge origin/$DEFAULT_BRANCH into it first (it is older than the test stack).
           3. Commit with Conventional Commits in English citing #$ISSUE_NUMBER, and push: git push -u origin $BRANCH
           4. When the task is ready (plan done, checks green), open the pull request against $DEFAULT_BRANCH, or update it if one already exists
              (gh pr list --head $BRANCH): gh pr create --base $DEFAULT_BRANCH --head $BRANCH --title "<conventional title> (#$ISSUE_NUMBER)" --body "..."
@@ -409,12 +538,14 @@ jobs:
           check results, PR link (or what blocks it).
           EOF
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/develop.md -p "$PROMPT" \
             --agent developer \
-            --dangerously-skip-permissions \
-            --output-format text \
-            --max-budget-usd 10 \
-            > /tmp/develop.md
+            --dangerously-skip-permissions
+
+      - name: Clean up the test stack
+        if: always()
+        run: |
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       - name: Push any remaining commits
         if: always()
@@ -425,13 +556,38 @@ jobs:
 
       # Safety net for step 5 of the prompt: if an open PR exists but the
       # label was not swapped, swap it here. Then hand over to testPR.
+      # If the developer step failed (crash), the PR may be left over from
+      # an earlier run with half-done work on top, so the issue only moves
+      # on if the agent itself already swapped the label, which it does
+      # only once the PR is ready. A stop for the usage limit never hands
+      # over: testPR would be stopped as well.
       - name: Move the issue to pr-raised
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          DEVELOPER_OUTCOME: ${{ steps.developer.outcome }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            echo "Stopped by the subscription usage limit; no hand-over."
+            exit 0
+          fi
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          [ -n "$PR" ] || exit 0
+          LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')
+          if [ -z "$PR" ]; then
+            # Finished without a PR and without a question for a person:
+            # the pipeline would stall silently, so a person takes over.
+            if [ "$DEVELOPER_OUTCOME" = "success" ] && ! echo "$LABELS" | grep -qx needs-info; then
+              gh label create human-review --color d93f0b --description "Necesita revisión de una persona" 2>/dev/null || true
+              gh issue edit "$ISSUE_NUMBER" --add-label human-review
+              gh issue comment "$ISSUE_NUMBER" --body "Etapa develop: el programador ha terminado sin abrir la PR ni dejar una pregunta (\`needs-info\`). El issue pasa a \`human-review\`: una persona tiene que revisarlo. Para repetir la etapa, quita \`human-review\` y comenta en el issue."
+            fi
+            exit 0
+          fi
+          if [ "$DEVELOPER_OUTCOME" != "success" ] && \
+             ! echo "$LABELS" | grep -qx pr-raised; then
+            echo "Developer step did not finish; the issue stays in develop."
+            exit 0
+          fi
           gh label create pr-raised --color 5319e7 --description "PR abierta: etapa testPR" 2>/dev/null || true
           gh issue edit "$ISSUE_NUMBER" --remove-label develop --add-label pr-raised
           gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=test-pr
@@ -455,7 +611,7 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'pr-raised')) ||
         (github.event_name == 'workflow_dispatch' && inputs.stage == 'test-pr')
       )
-    runs-on: ionos-l1-claude
+    runs-on: ionos-l1-test
     env:
       # Isolates the test stack from any other compose project on the
       # host (the deployed demo included), so `down -v` cannot touch it.
@@ -470,11 +626,22 @@ jobs:
         with:
           node-version: 22
 
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
+
       - name: Find the pull request
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          rm -f /tmp/testpr.md
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           echo "number=$PR" >> "$GITHUB_OUTPUT"
           if [ -z "$PR" ]; then
@@ -482,10 +649,41 @@ jobs:
             exit 1
           fi
 
-      - name: Prepare local environment file
-        run: cp -n .env.example .env || true
+      # Tests what the merge would produce: the PR branch plus the latest
+      # default branch (local only, never pushed). It also brings the test
+      # stack to branches created before it existed.
+      - name: Merge the latest default branch
+        id: base
+        run: |
+          git config user.name "Claude (automated)"
+          git config user.email "noreply@anthropic.com"
+          git fetch origin "$DEFAULT_BRANCH"
+          if git merge --no-edit "origin/$DEFAULT_BRANCH"; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort || true
+            printf 'RESULTADO: FALLIDO\n## Resultado del plan de pruebas\n\nLa rama `%s` tiene conflictos con `%s`: el programador tiene que actualizarla. No se ejecuta el plan de pruebas.\n' "$BRANCH" "$DEFAULT_BRANCH" > /tmp/testpr.md
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Start the test stack
+        id: stack
+        if: steps.base.outputs.ready == 'true'
+        run: |
+          if npm run test:stack:up > "$RUNNER_TEMP/stack-up.log" 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/stack-up.log"
+          {
+            printf 'RESULTADO: FALLIDO\n## Resultado del plan de pruebas\n\nNo se ha podido levantar el entorno de pruebas (`npm run test:stack:up`): falla la construcción de las imágenes de la rama o el arranque de algún servicio. No se ejecuta el plan de pruebas.\n\n<details><summary>Últimas líneas del log</summary>\n\n```\n'
+            tail -n 60 "$RUNNER_TEMP/stack-up.log"
+            printf '```\n\n</details>\n'
+          } > /tmp/testpr.md
+          echo "ready=false" >> "$GITHUB_OUTPUT"
 
       - name: Analyst - run the test plan
+        if: steps.stack.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -496,9 +694,15 @@ jobs:
           and the files it changes (git diff origin/$DEFAULT_BRANCH...HEAD --stat).
           Find the test plan: the "Plan de pruebas" section of the latest "Plan de acción para el desarrollador" comment points to specs/<module>/test-plan.md.
 
+          The workflow has already merged the latest $DEFAULT_BRANCH into the branch (locally) and started the test stack with npm run test:stack:up:
+          the branch's app (service web), PostgreSQL, MinIO and Mailpit run in containers. Every check and case runs inside the stack's tests container:
+            npm run test:stack:run -- <command>          e.g. npm run test:stack:run -- npm test
+            npm run test:stack:logs -- <service>         logs of web, postgres, minio or mailpit, to explain a failure
+          Nothing runs directly on this runner (there are no node_modules and no localhost services), and you must not stop the stack: the workflow does.
+
           You are in the TESTPR stage. Your job is to verify, before merging, that the pull request passes the test plan:
-          1. Run the "Preparación" steps, then every "Comprobaciones generales" check and every PP case that applies to this issue, exactly as written.
-             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          1. Skip the step of the "Preparación" that starts the stack (already done) and run the rest, then every "Comprobaciones generales" check
+             and every PP case that applies to this issue, exactly as written (inside the stack as above).
           2. For each case record the result: ✅ superado, ❌ fallido (with the relevant part of the output, never secrets or personal data) or ⏭️ no ejecutado (with the reason).
           3. Do not fix anything: do not edit files, commit, push, approve or merge. If a case fails, report it for the developer.
              If the test plan is missing, contradictory or cannot be run, report it for the analyst and the architect and answer BLOQUEADO.
@@ -514,33 +718,32 @@ jobs:
           ALLOWED=(
             "Read" "Grep" "Glob"
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)"
-            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
-            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(npm run test:stack:run:*)" "Bash(npm run test:stack:logs:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/testpr.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/testpr.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Clean up the test stack
         if: always()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            docker compose down -v --remove-orphans || true
-          fi
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       # Only SUPERADO moves the issue to `merge`. Anything else (FALLIDO,
       # BLOQUEADO, a crash with no result line) goes to `human-review`.
+      # A stop for the usage limit keeps `pr-raised`.
       - name: Post result and set the next label
         if: always() && steps.pr.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+            exit 0
+          fi
           [ -s /tmp/testpr.md ] || echo "⚠️ La etapa testPR ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/testpr.md
           gh pr comment "$PR_NUMBER" --body-file /tmp/testpr.md
           RESULT=$(grep -oE 'RESULTADO: (SUPERADO|FALLIDO|BLOQUEADO)' /tmp/testpr.md | head -1 | cut -d' ' -f2)
@@ -579,6 +782,20 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       # Deterministic gate, no agent involved. A module is merged in one
       # single step, so EVERY open issue sharing a `module:<x>` label with
@@ -708,7 +925,8 @@ jobs:
              Explain the fix needed for each one. Merge nothing.
 
           C) MERGE. Only if no global test is needed, or the integration issue is up to date with RESULTADO: SUPERADO.
-             1. Check EVERY PR before touching any: the last "Resultado del plan de pruebas" is SUPERADO for its current head, CI is green (gh pr checks <pr>),
+             1. Check EVERY PR before touching any: the last "Resultado del plan de pruebas" is SUPERADO for its current head, no CI check is failing
+                (gh pr checks <pr>; "no checks reported" is fine: pushes made by this pipeline do not trigger CI, and testPR is the gate),
                 it is mergeable (gh pr view <pr> --json mergeable,mergeStateStatus,baseRefName) against $DEFAULT_BRANCH, and the PRs fit specs/ and each other.
                 If any check fails, merge nothing: mark that issue with human-review as in B and explain why.
              2. Approve every PR: gh pr review <pr> --approve --body "Aprobada por el arquitecto en la etapa merge del módulo (#$ISSUE_NUMBER)."
@@ -731,13 +949,10 @@ jobs:
             "Bash(gh pr view:*)" "Bash(gh pr diff:*)" "Bash(gh pr checks:*)" "Bash(gh pr list:*)"
             "Bash(gh pr review:*)" "Bash(gh pr merge:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/merge.md -p "$PROMPT" \
             --agent architect \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 4 \
-            > /tmp/merge.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Hand over to module-test if a global test was requested
         if: always() && steps.gate.outputs.ready == 'true'
@@ -802,7 +1017,7 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.issue.labels.*.name, 'module-test')) ||
         (github.event_name == 'workflow_dispatch' && inputs.stage == 'module-test')
       )
-    runs-on: ionos-l1-claude
+    runs-on: ionos-l1-test
     env:
       COMPOSE_PROJECT_NAME: formia-moduletest-${{ github.event.issue.number || inputs.issue }}
     steps:
@@ -813,6 +1028,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Wrapper that stops the agent before it uses up the Claude
+      # subscription. Taken from the workflow's own commit, not from the
+      # issue branch, which may be older.
+      - name: Fetch the agent runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/run-agent.mjs?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
 
       - name: Configure git remote and identity
         env:
@@ -855,6 +1080,7 @@ jobs:
         env:
           BRANCHES: ${{ steps.module.outputs.branches }}
         run: |
+          rm -f /tmp/moduletest.md
           git fetch origin
           git checkout -B "$BRANCH" "origin/$DEFAULT_BRANCH"
           CONFLICTS=""
@@ -868,10 +1094,25 @@ jobs:
           if [ -n "$CONFLICTS" ]; then
             printf 'RESULTADO: BLOQUEADO\n## Resultado de la prueba global del módulo\n\nNo se ha podido construir la rama `%s`: hay conflictos al fusionar%s sobre `%s` y lo ya fusionado. No se ejecutan las pruebas.\n' "$BRANCH" "$CONFLICTS" "$DEFAULT_BRANCH" > /tmp/moduletest.md
           fi
-          cp -n .env.example .env || true
+
+      - name: Start the test stack
+        id: stack
+        if: steps.build.outputs.conflicts == ''
+        run: |
+          if npm run test:stack:up > "$RUNNER_TEMP/stack-up.log" 2>&1; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cat "$RUNNER_TEMP/stack-up.log"
+          {
+            printf 'RESULTADO: FALLIDO\n## Resultado de la prueba global del módulo\n\nNo se ha podido levantar el entorno de pruebas (`npm run test:stack:up`) con todas las PRs del módulo juntas. No se ejecutan las pruebas.\n\n<details><summary>Últimas líneas del log</summary>\n\n```\n'
+            tail -n 60 "$RUNNER_TEMP/stack-up.log"
+            printf '```\n\n</details>\n'
+          } > /tmp/moduletest.md
+          echo "ready=false" >> "$GITHUB_OUTPUT"
 
       - name: Analyst - write and run the global test plan
-        if: steps.build.outputs.conflicts == ''
+        if: steps.build.outputs.conflicts == '' && steps.stack.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           MODULES: ${{ steps.module.outputs.modules }}
@@ -887,8 +1128,10 @@ jobs:
           1. Write or update the section "Pruebas globales del módulo" of specs/<module>/test-plan.md, following the test-plan skill: cases PP-<MOD>-M<N>
              that test the module's pieces TOGETHER, as the architect asks. Keep the change history citing #$ISSUE_NUMBER.
              Commit it on $BRANCH: git add specs/ && git commit -m "docs(<module>): add global module test plan (#$ISSUE_NUMBER)". Do not push.
-          2. Run the "Preparación", the "Comprobaciones generales" and every PP-<MOD>-M case, exactly as written, then the "Limpieza" even if something failed.
-             The docker compose project is already isolated through COMPOSE_PROJECT_NAME; do not override it.
+          2. The workflow has already started the test stack (npm run test:stack:up) with this branch: app (service web), PostgreSQL, MinIO and Mailpit in containers.
+             Skip that step of the "Preparación", run the rest, the "Comprobaciones generales" and every PP-<MOD>-M case exactly as written, all inside
+             the stack's tests container: npm run test:stack:run -- <command>. Use npm run test:stack:logs -- <service> to explain a failure.
+             Nothing runs directly on this runner, and you must not stop the stack: the workflow does.
           3. Do not fix code: if something fails, say which PR or issue causes it, for the architect. Only specs/ may be edited.
 
           The FIRST line of your answer must be exactly one of: RESULTADO: SUPERADO | RESULTADO: FALLIDO | RESULTADO: BLOQUEADO
@@ -900,24 +1143,18 @@ jobs:
             "Read" "Grep" "Glob"
             "Edit(specs/**)" "Write(specs/**)"
             "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" "Bash(git add:*)" "Bash(git commit:*)"
-            "Bash(npm ci:*)" "Bash(npm install:*)" "Bash(npm run:*)" "Bash(npm test:*)" "Bash(npx:*)"
-            "Bash(docker compose:*)" "Bash(curl:*)"
+            "Bash(npm run test:stack:run:*)" "Bash(npm run test:stack:logs:*)"
             "Bash(gh issue view:*)" "Bash(gh pr view:*)" "Bash(gh pr diff:*)"
           )
-          claude -p "$PROMPT" \
+          node "$RUNNER_TEMP/run-agent.mjs" /tmp/moduletest.md -p "$PROMPT" \
             --agent analyst-programmer \
             --permission-mode dontAsk \
-            --allowedTools "${ALLOWED[@]}" \
-            --output-format text \
-            --max-budget-usd 5 \
-            > /tmp/moduletest.md
+            --allowedTools "${ALLOWED[@]}"
 
       - name: Clean up the test stack
         if: always()
         run: |
-          if command -v docker >/dev/null 2>&1; then
-            docker compose down -v --remove-orphans || true
-          fi
+          if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       # The integration PR carries the global test plan into main. The
       # architect merges it last, after the module's PRs.
@@ -927,6 +1164,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MODULES: ${{ steps.module.outputs.modules }}
         run: |
+          [ ! -f "$RUNNER_TEMP/usage-limit.md" ] || exit 0
           git push --force origin "$BRANCH"
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
             gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
@@ -941,6 +1179,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
+            gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+            exit 0
+          fi
           [ -s /tmp/moduletest.md ] || echo "⚠️ La etapa module-test ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/moduletest.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/moduletest.md
           gh label create module-test-done --color c2e0c6 --description "Prueba global terminada: la analiza el arquitecto" 2>/dev/null || true

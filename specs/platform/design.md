@@ -156,6 +156,33 @@ sequenceDiagram
 | CA-PLT-04 | Vitest | `src/server/platform/health.service.test.ts` — `checkHealth` con las dos comprobaciones en `true` devuelve `status: "ok"`; con cualquiera en `false` devuelve `status: "error"` y marca solo el campo correspondiente. |
 | RF-PLT-08 (endpoint) | Vitest | `src/app/api/health/route.test.ts` — mockea `checkHealth` y comprueba que la respuesta tiene el código HTTP esperado (200/503) y el cuerpo JSON correcto. |
 
+## Pruebas en contenedores
+
+Las etapas `develop`, `testPR` y `module-test` del pipeline prueban la rama dentro de contenedores, en el runner `ionos-l1-test`. El Docker de ese runner es un contenedor auxiliar Docker-in-Docker, aislado del Docker de la máquina, así que las pruebas no pueden tocar la demo desplegada. El mismo entorno funciona en local con Docker.
+
+| Fichero | Papel |
+| --- | --- |
+| `docker-compose.test.yml` | Se combina con `docker-compose.yml`. Añade `web` (la imagen de producción construida desde la rama; no se llama `app` porque Chromium fuerza HTTPS en `.app`), `tests` (código de la rama + dependencias de desarrollo + Chromium) y `minio-init` (crea el bucket). Quita los puertos publicados (`ports: !reset []`, Compose ≥ 2.24.4). |
+| `Dockerfile.test` (+ `Dockerfile.test.dockerignore`) | Imagen de `tests`: `node:22-bookworm`, `npm ci` y `npx playwright install --with-deps chromium`, con la versión de Playwright del lockfile. |
+| `scripts/test-stack.sh` | `up`, `run`, `logs` y `down`; expuesto como `npm run test:stack:*`. Aísla cada ejecución con `COMPOSE_PROJECT_NAME` (por defecto `formia-test`). |
+
+Funcionamiento:
+
+- Las pruebas se ejecutan **dentro** del contenedor `tests` y llegan a los servicios por su nombre (`postgres`, `minio`, `mailpit`, `web`), nunca por `localhost`. Sin puertos publicados, varias ramas se prueban a la vez sin chocar.
+- `npm run test:stack:up`: construye las imágenes, levanta PostgreSQL, MinIO y Mailpit, crea el bucket, aplica las migraciones (`npm run db:migrate` desde `tests`) y arranca `web` hasta que `/api/health` responde.
+- `npm run test:stack:run -- <comando>`: ejecuta cualquier comando en `tests` (`npm test`, `npx playwright test`, `curl -fsS http://web:3000/api/health`…).
+- `npm run test:stack:down`: borra contenedores, volúmenes e imágenes de la rama.
+- Las variables salen de `.env.example` (sin secretos). `docker-compose.test.yml` sustituye las que apuntan a `localhost` por el nombre del servicio; un módulo que añada a `.env.example` una variable de ese tipo la añade también allí.
+- Playwright usa `E2E_BASE_URL` (`http://web:3000`) si está definida; si no, arranca `npm run dev` como hasta ahora.
+- En `testPR`, el workflow fusiona antes la última rama principal en la rama de la PR (solo en local): se prueba lo que quedaría al fusionar.
+- **Imagen de MinIO.** MinIO dejó de publicar `minio/minio` en Docker Hub y quay.io, así que el Docker del runner de pruebas no puede descargarla. Mientras no se decida un sustituto, se copia desde un Docker que aún la tenga (el del servidor, donde corre la demo) al Docker-in-Docker del runner, una vez y cada vez que se borre su volumen:
+
+  ```bash
+  docker save minio/minio:latest | docker exec -i gh-runner-claude-test-dind docker load
+  ```
+
+  Compose usa la imagen local y no intenta descargarla. Conviene guardar también una copia (`docker save minio/minio:latest -o minio.tar`) fuera del servidor.
+
 ## Tareas de desarrollo
 
 | Orden | Issue | Tarea | Depende de |
@@ -173,4 +200,6 @@ sequenceDiagram
 ## Historial de cambios
 
 - 2026-11-14 — Diseño técnico inicial (#3): estructura del proyecto, validación de entorno, endpoint de salud, docker-compose de desarrollo y producción, y adaptación de la CI existente.
+- 2026-11-18 — Corrección del build de la imagen de producción: `/api/health` llama a `connection()` para que Next.js no intente generarla al construir (fallaba sin variables de entorno), y el `Dockerfile` crea `public/` (no existe en el repositorio y la fase final lo copia).
+- 2026-11-18 — Pruebas en contenedores: `docker-compose.test.yml`, `Dockerfile.test`, `scripts/test-stack.sh` y `E2E_BASE_URL` en `playwright.config.ts`, para que el pipeline pruebe cada rama en contenedores aislados.
 - 2026-11-15 — Correcciones del arquitecto (#3): separada la responsabilidad de `package.json` (`postinstall` y `"prisma": { "seed": ... }`) de `prisma.config.ts` (no se necesita en este módulo) en la sección "Modelo de datos", para que quede claro qué va en cada fichero.

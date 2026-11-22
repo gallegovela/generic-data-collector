@@ -1,0 +1,10 @@
+# Contexto de Dockerfile.test. A diferencia de .dockerignore (imagen de
+# producción), incluye e2e/ y los ficheros de configuración de las pruebas.
+node_modules
+.next
+.git
+.env
+.env.local
+npm-debug.log
+playwright-report
+test-results
