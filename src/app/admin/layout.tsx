@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { requireAdminPage } from "@/server/auth/session";
 
@@ -12,6 +13,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <a href="/admin" className="hover:underline">
             Panel
           </a>
+          <Link href="/admin/forms" className="hover:underline">
+            Formularios
+          </Link>
           <a href="/admin/users" className="hover:underline">
             Usuarios
           </a>
