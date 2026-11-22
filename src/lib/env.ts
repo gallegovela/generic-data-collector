@@ -24,6 +24,13 @@ export const envSchema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  AUTH_SECRET: z.string().min(32),
+  AUTH_URL: z.string().url().default("http://localhost:3000"),
+  SMTP_HOST: z.string().min(1).default("localhost"),
+  SMTP_PORT: z.coerce.number().int().positive().default(1025),
+  SMTP_FROM: z.string().email().default("no-reply@formia.local"),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
