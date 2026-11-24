@@ -11,8 +11,8 @@ description: Cómo leer, crear, enlazar y comentar issues y pull requests de Git
 node $RUNNER_TEMP/issue-thread.mjs <n>            # leer issue o PR e hilo (en el pipeline)
 node .github/scripts/issue-thread.mjs <n>         # lo mismo fuera del pipeline
 gh issue list --state all --search "Padre: #<n> in:body"   # hijos de un issue
-gh issue create --title '<t>' --body '<cuerpo>' --label "module:<modulo>"
-gh issue edit <n> --body '<cuerpo>'                # actualizar la lista de tareas del padre
+gh issue create --title '<t>' --body-file <fichero> --label "module:<modulo>"
+gh issue edit <n> --body-file <fichero>           # actualizar la lista de tareas del padre
 gh issue edit <n> --add-label needs-info           # bloquear esperando respuesta
 gh issue edit <n> --remove-label needs-info
 gh label create "module:<modulo>" --color 0e8a16 --description "<d>"   # si no existe
@@ -25,7 +25,7 @@ gh pr review <pr> --approve --body "<motivo>"       # solo el architect, en la e
 gh pr merge <pr> --merge                           # solo el architect, en la etapa merge
 ```
 
-En el pipeline de GitHub Actions, el cuerpo se pasa en línea con `--body "..."`, sin tuberías, heredocs ni ficheros temporales: los permisos del agente solo admiten el comando directo. La respuesta final del agente la publica el propio workflow como comentario; el agente no tiene que comentar a mano.
+En el pipeline de GitHub Actions, el cuerpo de un issue nunca se pasa en línea con `--body`: la comprobación de permisos rechaza cualquier comando de varias líneas con una línea que empiece por `#` (todos los títulos Markdown), y también las tuberías, los heredocs y la sustitución de comandos. Escribe el cuerpo con la herramienta Write en `$RUNNER_TEMP/bodies/<nombre>.md` (el único sitio donde se permite escribir) y pásalo con `--body-file` en un comando de una sola línea. El título va entre comillas simples; si necesita un apóstrofo, usa ’. La respuesta final del agente la publica el propio workflow como comentario; el agente no tiene que comentar a mano.
 
 ## Etiquetas
 
