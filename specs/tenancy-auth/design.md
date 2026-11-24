@@ -121,7 +121,7 @@ model LoginToken {
 | Integración | `src/server/integrations/email.ts` | `sendEmail`. Cliente SMTP (nodemailer) genérico. |
 | Integración | `src/lib/auth/emails.ts` | `buildMagicLinkEmail`, `buildInvitationEmail` (asunto + HTML + texto, sin E/S). |
 | Auth.js | `src/auth.ts` | `NextAuth(...)`: proveedores, callbacks `jwt`/`session`, exporta `handlers`, `auth`, `signIn`, `signOut`. |
-| Tipos | `src/types/next-auth.d.ts` | Aumenta `Session.user` y el `JWT` con `organizationId` y `role`. |
+| Tipos | `src/types/next-auth.d.ts` | Aumenta `Session.user` con `id`, `organizationId` y `role`, y `User` con `organizationId` y `role`. |
 | Entrada | `src/app/api/auth/[...nextauth]/route.ts` | `export const { GET, POST } = handlers`. |
 | Entrada | `src/server/auth/auth.actions.ts` | Server actions: `requestMagicLinkAction`. |
 | Entrada | `src/server/auth/user.actions.ts` | Server actions: `inviteUserAction`, `deactivateUserAction`, `acceptInvitationAction`. |
@@ -400,7 +400,8 @@ export const { handlers, auth, signIn, signOut }: {
   signOut: typeof import("next-auth/react").signOut;
 };
 // session: { strategy: "jwt" }; providers: [Credentials({ id: "password", ... }), Credentials({ id: "magic-link", ... })]
-// callbacks.jwt añade organizationId/role al token; callbacks.session los copia a session.user
+// callbacks.jwt añade organizationId/role al token; callbacks.session copia a session.user el id (token.sub, que Auth.js rellena con user.id), organizationId y role.
+// Los tres son obligatorios: getCurrentUser() devuelve null si falta cualquiera, y las páginas del panel redirigen a /login.
 ```
 
 ```ts
@@ -522,3 +523,4 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 
 - 2026-11-17 — Diseño técnico inicial (#4): modelo de datos (`Organization`, `User`, `Invitation`, `LoginToken`), Auth.js v5 con sesión JWT y dos proveedores `Credentials` (contraseña y enlace mágico), guardián de sesión (`middleware.ts`, `session.ts`) y su reutilización por los módulos siguientes, invitación de usuarios, límite de intentos de login en memoria, e integración de email genérica.
 - 2026-11-17 — Revisión del arquitecto (#4, APROBADO): se fijan las credenciales exactas del seed ([Datos de ejemplo (seed)](#datos-de-ejemplo-seed)), de las que dependían PP-AUT-07/08 sin un valor concreto documentado.
+- 2026-11-24 — Corrección: el callback `session` no copiaba el id del usuario a `session.user.id`, así que `getCurrentUser()` devolvía `null` y ningún admin podía entrar en `/admin` aunque el login fuera correcto. Ahora lo copia desde `token.sub`; test en `src/auth.config.test.ts`.

@@ -21,6 +21,11 @@ export const authConfig: NextAuthConfig = {
       return token;
     },
     session({ session, token }) {
+      // Auth.js guarda el id del usuario en `token.sub`; sin él,
+      // getCurrentUser() devuelve null y el panel redirige a /login.
+      if (token.sub) {
+        session.user.id = token.sub;
+      }
       if (token.organizationId) {
         session.user.organizationId = token.organizationId as string;
       }
