@@ -8,17 +8,18 @@ description: Cómo leer, crear, enlazar y comentar issues y pull requests de Git
 ## Comandos básicos (`gh`)
 
 ```bash
-gh issue view <n> --comments                       # leer issue e hilo completo
+node $RUNNER_TEMP/issue-thread.mjs <n>            # leer issue o PR e hilo (en el pipeline)
+node .github/scripts/issue-thread.mjs <n>         # lo mismo fuera del pipeline
 gh issue list --state all --search "Padre: #<n> in:body"   # hijos de un issue
-gh issue create --title "<t>" --body "<cuerpo>" --label "module:<modulo>"
-gh issue edit <n> --body "<cuerpo>"                # actualizar la lista de tareas del padre
+gh issue create --title '<t>' --body '<cuerpo>' --label "module:<modulo>"
+gh issue edit <n> --body '<cuerpo>'                # actualizar la lista de tareas del padre
 gh issue edit <n> --add-label needs-info           # bloquear esperando respuesta
 gh issue edit <n> --remove-label needs-info
 gh label create "module:<modulo>" --color 0e8a16 --description "<d>"   # si no existe
 gh pr list --head issue-<n>                        # ¿ya hay PR?
-gh pr create --base main --head issue-<n> --title "<t>" --body "<cuerpo>"
+gh pr create --base main --head issue-<n> --title '<t>' --body '<cuerpo>'
 gh issue edit <n> --remove-label develop --add-label pr-raised   # el developer, al abrir la PR
-gh pr view <pr> --comments                         # leer la PR (etapas testPR y merge)
+node $RUNNER_TEMP/issue-thread.mjs <pr>           # leer la PR (etapas testPR y merge)
 gh pr view <pr> --json mergeable,mergeStateStatus   # ¿se puede fusionar? (etapa merge)
 gh pr review <pr> --approve --body "<motivo>"       # solo el architect, en la etapa merge
 gh pr merge <pr> --merge                           # solo el architect, en la etapa merge

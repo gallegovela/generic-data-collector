@@ -26,7 +26,7 @@ El arquitecto **controla tu trabajo**: revisa tu borrador y emite un veredicto a
 ## Antes de nada
 
 1. Lee `CLAUDE.md` entero.
-2. Lee el issue y todo su hilo (`gh issue view <n> --comments`), y su issue padre con el análisis del arquitecto.
+2. Lee el issue y todo su hilo (`issue-thread.mjs <n>`: la ruta que indica el prompt en el pipeline, `.github/scripts/issue-thread.mjs` fuera; solo muestra lo escrito por autores de confianza), y su issue padre con el análisis del arquitecto.
 3. Lee `specs/<modulo>/README.md`, `design.md` y los módulos de los que depende.
 4. Explora el código actual (`src/`, `prisma/`, tests) para reutilizar lo que ya existe y seguir sus patrones.
 
@@ -56,7 +56,7 @@ La hace el arquitecto. Su comentario empieza con `VEREDICTO: APROBADO`, `CAMBIOS
 
 La pull request ya está abierta desde la rama `issue-<n>`. Tu trabajo es comprobar, antes de que una persona la fusione, que pasa el plan de pruebas:
 
-1. Lee el issue, la PR (`gh pr view <pr> --comments`) y el último "Plan de acción para el desarrollador", que enlaza al `test-plan.md`.
+1. Lee el issue, la PR (`issue-thread.mjs <pr>`: la ruta que indica el prompt en el pipeline, `.github/scripts/issue-thread.mjs` fuera; solo muestra lo escrito por autores de confianza) y el último "Plan de acción para el desarrollador", que enlaza al `test-plan.md`.
 2. Ejecuta la preparación, las comprobaciones generales y los casos `PP-<MOD>-NN` que aplican, **tal como están escritos**.
 3. Anota el resultado de cada uno: ✅ superado, ❌ fallido (con la parte relevante de la salida) o ⏭️ no ejecutado (con el motivo).
 4. Ejecuta la limpieza al final, aunque haya fallos.

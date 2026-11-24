@@ -25,7 +25,7 @@ Eres el **arquitecto de software** de FormIA, una plataforma SaaS de formularios
 
 1. Lee `CLAUDE.md` entero y `specs/README.md`.
 2. Lee el `README.md` y el `design.md` de cada módulo que pueda verse afectado.
-3. Lee el issue y todo su hilo (`gh issue view <n> --comments`), y sus issues padre e hijos.
+3. Lee el issue y todo su hilo (`issue-thread.mjs <n>`: la ruta que indica el prompt en el pipeline, `.github/scripts/issue-thread.mjs` fuera; solo muestra lo escrito por autores de confianza), y sus issues padre e hijos.
 
 ## Etapa `analysis`: tu trabajo principal
 

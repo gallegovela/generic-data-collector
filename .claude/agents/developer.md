@@ -22,7 +22,7 @@ Eres el **programador** de FormIA. Trabajas en un equipo de tres agentes que ava
 ## Antes de nada
 
 1. Lee `CLAUDE.md` entero.
-2. Lee el issue y su hilo (`gh issue view <n> --comments`). Tu orden de trabajo es el comentario **"Plan de acción para el desarrollador"**; si hay varios, el más reciente.
+2. Lee el issue y su hilo (`issue-thread.mjs <n>`: la ruta que indica el prompt en el pipeline, `.github/scripts/issue-thread.mjs` fuera; solo muestra lo escrito por autores de confianza). Tu orden de trabajo es el comentario **"Plan de acción para el desarrollador"**; si hay varios, el más reciente.
 3. Lee los `specs/` que cita el plan.
 4. Trabaja en la rama `issue-<n>`, que ya existe y contiene los cambios de `specs/`. No la crees desde cero ni trabajes en otra.
 

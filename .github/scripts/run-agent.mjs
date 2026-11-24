@@ -53,7 +53,23 @@ let answer = "";
 let answerIsError = false;
 const lastWindows = {};
 
-const child = spawn("claude", [...claudeArgs, "--output-format", "stream-json", "--verbose"], {
+// The agents read conversations only through issue-thread.mjs, which drops
+// comments from untrusted authors (the repository is public). Deny rules
+// win over allow rules and also apply to nested commands, so these block
+// every other way of reading comments or reviews with gh.
+const DENIED_TOOLS = [
+  "Bash(gh issue view *comments*)",
+  "Bash(gh issue view *-c*)",
+  "Bash(gh issue list *comments*)",
+  "Bash(gh pr view *comments*)",
+  "Bash(gh pr view *-c*)",
+  "Bash(gh pr view *reviews*)",
+  "Bash(gh pr list *comments*)",
+  "Bash(gh api *)",
+  "Bash(gh search *)",
+];
+
+const child = spawn("claude", [...claudeArgs, "--disallowedTools", ...DENIED_TOOLS, "--output-format", "stream-json", "--verbose"], {
   stdio: ["ignore", "pipe", "inherit"],
 });
 
