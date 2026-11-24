@@ -33,7 +33,8 @@ generator client {
 | --- | --- | --- |
 | Configuración | `package.json`, `tsconfig.json`, `next.config.ts`, `tailwind.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `components.json` | Generados por `create-next-app`/`shadcn init`; `next.config.ts` añade `output: "standalone"`. |
 | Entorno | `src/lib/env.ts` | Esquema Zod y carga de variables de entorno (`loadEnv`, `getEnv`). |
-| Arranque | `instrumentation.ts` (raíz del proyecto) | Llama a `getEnv()` una vez por instancia del servidor; si falla, el proceso no arranca. |
+| Arranque | `instrumentation.ts` (raíz del proyecto) | Llama a `getEnv()` una vez por instancia del servidor; si falla, el proceso no arranca. Exporta `onRequestError`, que registra los errores no capturados (RNF-PLT-05). |
+| Servicio | `src/server/platform/error-log.ts` | Construye y escribe la línea JSON de un error del servidor (`buildRequestErrorLog`, `logRequestError`). |
 | Prisma | `prisma/schema.prisma`, `prisma/seed.ts`, `src/server/db/client.ts` | Esquema base, seed placeholder, cliente Prisma singleton. |
 | Servicio | `src/server/platform/health.service.ts` | Comprobación de base de datos y almacenamiento (`checkHealth`). |
 | Entrada | `src/app/api/health/route.ts` | `GET` que llama al servicio y traduce el resultado a HTTP. |
@@ -79,6 +80,31 @@ export function getEnv(): Env;
 ```ts
 // instrumentation.ts
 export function register(): void; // llama a getEnv(); deja que el error de loadEnv se propague y pare el arranque
+export function onRequestError(error: unknown, request: RequestErrorRequest, context: RequestErrorContext): void; // delega en logRequestError
+```
+
+```ts
+// src/server/platform/error-log.ts
+// Subconjunto de los argumentos de onRequestError de Next.js que se usan.
+export type RequestErrorRequest = { method: string };
+export type RequestErrorContext = { routePath: string; routeType: string; renderSource?: string };
+
+export type RequestErrorLog = {
+  level: "error";
+  event: "request_error";
+  time: string;          // ISO 8601
+  method: string;        // GET, POST...
+  route: string;         // plantilla: context.routePath, nunca request.path
+  routeType: string;     // "render" | "route" | "action" | "middleware"
+  renderSource?: string;
+  name: string;          // error.name, o "NonError" si no es un Error
+  code?: string;         // error.code si es string (Prisma "P2002", Node "ECONNREFUSED")
+  digest?: string;       // el código que muestra la página de error de Next
+  stack?: string[];      // solo líneas "at ...", máximo 10; sin la primera línea (que lleva el mensaje)
+};
+
+export function buildRequestErrorLog(error: unknown, request: RequestErrorRequest, context: RequestErrorContext, now?: Date): RequestErrorLog;
+export function logRequestError(error: unknown, request: RequestErrorRequest, context: RequestErrorContext): void; // console.error(JSON.stringify(...)); nunca lanza
 ```
 
 ```ts
@@ -146,6 +172,7 @@ sequenceDiagram
 - `.env.example` no contiene secretos reales (placeholders tipo `changeme`).
 - En producción, las credenciales de PostgreSQL y MinIO no son las de desarrollo: salen de los secrets del environment `ionosL1` (ver [Despliegue](#despliegue)). El `.env` generado en el servidor tiene permisos `600` y el paso que lo crea solo registra en el log los **nombres** de las variables sustituidas, nunca sus valores.
 - Sin datos personales en este módulo: no hay entidades de negocio todavía.
+- Registro de errores (RNF-PLT-05): `logRequestError` no escribe el mensaje del error (los errores de Prisma o de validación pueden llevar valores introducidos por el usuario), ni `request.path` (lleva tokens de invitación y query string), ni cabeceras. La ruta sale de `context.routePath`, que es la plantilla (`/invite/[token]`). Para relacionar un fallo visto en pantalla con su línea del log se usa el `digest`.
 
 ## Despliegue
 
@@ -193,6 +220,7 @@ Se combina con `docker-compose.yml` (`-f docker-compose.yml -f docker-compose.pr
 | CA-PLT-02 | Verificación de configuración de CI, no test de repositorio | `.github/workflows/tests.yml` incluye el paso `npm run typecheck`; se verifica observando que la CI falla ante un error de tipos introducido deliberadamente en un PR de prueba (no se deja ese error en el código). |
 | CA-PLT-03 | Vitest | `src/lib/env.test.ts` — `loadEnv({ ...válido, DATABASE_URL: undefined })` lanza `Error` cuyo mensaje incluye `DATABASE_URL`; con todas las variables presentes y válidas, `loadEnv` devuelve el objeto esperado. |
 | CA-PLT-04 | Vitest | `src/server/platform/health.service.test.ts` — `checkHealth` con las dos comprobaciones en `true` devuelve `status: "ok"`; con cualquiera en `false` devuelve `status: "error"` y marca solo el campo correspondiente. |
+| CA-PLT-05 | Vitest | `src/server/platform/error-log.test.ts` — `buildRequestErrorLog` con un `Error` con mensaje, `digest`, `code` y pila devuelve la plantilla de ruta, `name`, `code`, `digest` y solo las líneas `at`; el JSON resultante no contiene el mensaje ni el valor del parámetro. Con un valor que no es `Error` devuelve `name: "NonError"`. `logRequestError` escribe una sola línea con `console.error`. |
 | RF-PLT-08 (endpoint) | Vitest | `src/app/api/health/route.test.ts` — mockea `checkHealth` y comprueba que la respuesta tiene el código HTTP esperado (200/503) y el cuerpo JSON correcto. |
 
 ## Pruebas en contenedores
@@ -235,6 +263,7 @@ Funcionamiento:
 | 7 | #3 | `Dockerfile`, `.dockerignore`, `docker-compose.prod.yml` (credenciales desde `.env`), adaptar `deploy.yml` (environment `ionosL1` y generación de `.env`) | 3 |
 | 8 | #3 | Reescribir `tests.yml`; `playwright.config.ts`, `vitest.config.ts`, `e2e/platform-smoke.spec.ts` | 2, 4, 5, 6 |
 | 9 | #3 | `README.md` raíz con la guía de arranque (RNF-PLT-04) | 1-8 |
+| 10 | — | `src/server/platform/error-log.ts` + test, `onRequestError` en `instrumentation.ts` (RNF-PLT-05) | 2 |
 
 ## Historial de cambios
 
@@ -244,3 +273,4 @@ Funcionamiento:
 - 2026-11-15 — Correcciones del arquitecto (#3): separada la responsabilidad de `package.json` (`postinstall` y `"prisma": { "seed": ... }`) de `prisma.config.ts` (no se necesita en este módulo) en la sección "Modelo de datos", para que quede claro qué va en cada fichero.
 - 2026-11-17 — Despliegue (#3): `deploy.yml` genera `.env` a partir de `.env.example` y de los secrets y variables del environment `ionosL1`; `docker-compose.prod.yml` toma de `.env` las credenciales de PostgreSQL y MinIO y fija los endpoints internos de la app; nuevas variables `POSTGRES_USER`, `POSTGRES_PASSWORD` y `POSTGRES_DB` en `.env.example`. Nueva sección "Despliegue".
 - 2026-11-24 — `docker-compose.prod.yml`: PostgreSQL y MinIO se pueden desactivar (perfiles y `COMPOSE_PROFILES`) para usar los servicios del servidor; nuevas variables `COMPOSE_PROFILES`, `POSTGRES_HOST`, `POSTGRES_PORT`, `S3_DOCKER_ENDPOINT`, `SHARED_NETWORK` y `APP_PORT` en `.env.example`.
+- 2026-11-24 — Registro mínimo de errores del servidor (RNF-PLT-05): `onRequestError` en `instrumentation.ts` y `src/server/platform/error-log.ts`.

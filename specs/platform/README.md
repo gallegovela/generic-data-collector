@@ -58,6 +58,7 @@ Proporcionar el esqueleto técnico sobre el que se construyen los demás módulo
 | RNF-PLT-02 | Must | Los secretos solo se leen de variables de entorno; nunca se suben al repositorio. |
 | RNF-PLT-03 | Must | El entorno de demo se aloja en la UE. |
 | RNF-PLT-04 | Should | Un desarrollador nuevo tiene la demo funcionando en local en menos de 15 minutos siguiendo el README raíz. |
+| RNF-PLT-05 | Must | Todo error no capturado en el servidor (route handlers, server components y server actions) deja una línea JSON en la salida de errores del proceso (`docker logs`) con la hora, el método, la plantilla de la ruta (`/invite/[token]`, nunca la URL real), el tipo de ruta, el nombre y el código del error, el `digest` que ve el usuario y las líneas de la pila. No incluye el mensaje del error, la query string, cabeceras, cuerpos ni datos de las respuestas (RGPD). |
 
 ## Flujos principales
 
@@ -78,6 +79,7 @@ No aplica: `platform` no define entidades de negocio propias. `prisma/schema.pri
 - **CA-PLT-02** — Dado un push con un error de tipos, cuando corre la CI, entonces el trabajo falla.
 - **CA-PLT-03** — Dada una variable obligatoria sin definir, cuando arranca la aplicación, entonces se detiene indicando el nombre de la variable.
 - **CA-PLT-04** — Dada la base de datos y el almacenamiento accesibles, cuando se consulta `GET /api/health`, entonces responde 200 con un cuerpo `HealthCheckResult` cuyo campo `status` es `"ok"` (entre otros campos, ver `checks` en [design.md](design.md#contratos)); si alguno no está accesible, responde 503 con `status: "error"` indicando en `checks` cuál ha fallado.
+- **CA-PLT-05** — Dado un error no capturado en una petición a `/invite/abc123?x=1`, cuando el servidor lo procesa, entonces escribe en la salida de errores una línea JSON con `event: "request_error"`, `route: "/invite/[token]"`, el `name` y el `digest` del error, y la línea no contiene ni el mensaje del error, ni `abc123`, ni la query string.
 
 ## Supuestos y preguntas abiertas
 
@@ -91,3 +93,4 @@ No aplica: `platform` no define entidades de negocio propias. `prisma/schema.pri
 - 2026-11-14 — Creación del módulo.
 - 2026-11-14 — Alcance y requisitos revisados para el diseño técnico: comandos `build`/`start`, volúmenes persistentes, `.env.example` acotado a las variables de este módulo, nuevo CA-PLT-04 para el endpoint de salud, y resolución parcial de las preguntas abiertas (#3).
 - 2026-11-15 — Aplicadas las correcciones del arquitecto (#3): se resuelve sin ambigüedad que no se usa Azure (confirmado por el responsable de producto) y que el servidor del runner está en la UE; se añaden las secciones "Flujos principales" y "Datos" (ambas "no aplica", explícitas); se amplía el texto de CA-PLT-04 para que cubra el cuerpo completo de `HealthCheckResult`.
+- 2026-11-24 — Nuevo RNF-PLT-05 y CA-PLT-05: registro mínimo de errores del servidor, sin datos personales, para poder diagnosticar fallos en `docker logs`.

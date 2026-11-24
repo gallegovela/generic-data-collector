@@ -1,4 +1,9 @@
 import { getEnv } from "@/lib/env";
+import {
+  logRequestError,
+  type RequestErrorContext,
+  type RequestErrorRequest,
+} from "@/server/platform/error-log";
 
 /**
  * Se ejecuta una vez por instancia del servidor, antes de aceptar
@@ -10,4 +15,18 @@ import { getEnv } from "@/lib/env";
  */
 export function register(): void {
   getEnv();
+}
+
+/**
+ * Next.js la llama con cada error no capturado en el servidor (route
+ * handlers, server components, server actions y middleware).
+ *
+ * Cubre: RNF-PLT-05.
+ */
+export function onRequestError(
+  error: unknown,
+  request: RequestErrorRequest,
+  context: RequestErrorContext,
+): void {
+  logRequestError(error, request, context);
 }
