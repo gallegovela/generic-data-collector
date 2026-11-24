@@ -189,6 +189,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          BODIES="$RUNNER_TEMP/bodies"
+          rm -rf "$BODIES" && mkdir -p "$BODIES"
           PROMPT=$(cat <<EOF
           Read CLAUDE.md in full, then specs/README.md and every specs/<module>/ that issue #$ISSUE_NUMBER may touch.
           Read issue #$ISSUE_NUMBER and its whole thread: node $RUNNER_TEMP/issue-thread.mjs $ISSUE_NUMBER.
@@ -202,16 +204,19 @@ jobs:
              gh issue edit $ISSUE_NUMBER --add-label needs-info
              and do NOT create child issues yet. If the thread already answers your previous questions, remove needs-info and continue.
           5. Otherwise create one child issue per development piece (normally one per module affected), following the "design" issue template of the github-issues skill,
-             with gh issue create --title '...' --body '...' --label design --label "module:<module>" (create a missing label with gh label create).
-             The body must contain the line "Padre: #$ISSUE_NUMBER". Pass the body inline with --body; do not use pipes, heredocs or temporary files.
-             Always quote --title and --body with SINGLE quotes ('...'), never double quotes: the body has backticks and inside double quotes they are command substitution,
-             and the permission check denies any command with substitution. If the text needs an apostrophe, write ’ instead of '.
+             The body must contain the line "Padre: #$ISSUE_NUMBER". Write it with the Write tool to a file in $BODIES/ (for example $BODIES/child-1.md),
+             then create the issue in a single-line command:
+             gh issue create --title '...' --label design --label "module:<module>" --body-file $BODIES/child-1.md
+             (create a missing label with gh label create). Never pass a body inline with --body: the permission check denies any multi-line command
+             with a line that starts with # (every Markdown heading), and pipes, heredocs and command substitution are denied too.
+             Quote --title with SINGLE quotes; if it needs an apostrophe, write ’ instead of '.
              The design label starts the analyst's design stage right away, so only create a child when its piece is fully decided.
              Pieces of the same module are merged together in one single step, so each one must be developable from $DEFAULT_BRANCH on its own:
              do not make a piece depend on another unmerged piece of the same module (merge them into one child instead).
              Do not duplicate children that already exist; update them with gh issue edit instead.
-          6. Update the task list of issue #$ISSUE_NUMBER with its children (gh issue edit $ISSUE_NUMBER --body '...', single quotes as above, keeping the original text).
-          You must not modify any file in the repository.
+          6. Update the task list of issue #$ISSUE_NUMBER with its children, keeping the original text: write the whole new body to $BODIES/parent.md
+             and run gh issue edit $ISSUE_NUMBER --body-file $BODIES/parent.md
+          You must not modify any file in the repository; the only files you may write are the issue bodies in $BODIES/.
 
           Your final answer is posted verbatim as a comment on the issue: write it for the product owner, in the same language as the issue, with sections
           Análisis, Arquitectura propuesta, Errores y mejoras detectados, Recomendaciones, Issues creados (or Preguntas pendientes) and Siguiente paso.
@@ -219,6 +224,7 @@ jobs:
           )
           ALLOWED=(
             "Read" "Grep" "Glob"
+            "Edit(/$BODIES/**)"
             "Bash(node $RUNNER_TEMP/issue-thread.mjs *)"
             "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue create:*)" "Bash(gh issue edit:*)"
@@ -918,6 +924,8 @@ jobs:
           MODULES: ${{ steps.gate.outputs.modules }}
           SUMMARY: ${{ steps.gate.outputs.summary }}
         run: |
+          BODIES="$RUNNER_TEMP/bodies"
+          rm -rf "$BODIES" && mkdir -p "$BODIES"
           PROMPT=$(cat <<EOF
           Read CLAUDE.md in full and specs/README.md. Issue #$ISSUE_NUMBER has just reached the MERGE stage.
           The workflow has already checked that EVERY open issue of module(s) $MODULES is ready (tests passed, PR open):
@@ -932,10 +940,11 @@ jobs:
              (shared contracts or migrations, the same files, flows that cross several PRs, anything "in the air" between them).
              Also take this path when an integration issue exists but is stale, or failed because of the test plan itself.
              - If there is no integration issue for the module, create one with the "issue de prueba global" template of the github-issues skill:
-               gh issue create --title 'Prueba global del módulo <module>' --label integration --label "module:<module>" --body '...'
-             - If there is one, update its body with what must be tested now: gh issue edit <m> --body '...'
-             - Always quote --title and --body with SINGLE quotes ('...'), never double quotes: the body has backticks and inside double quotes they are command substitution,
-               and the permission check denies any command with substitution. If the text needs an apostrophe, write ’ instead of '.
+               write the body with the Write tool to $BODIES/integration.md and run, in a single line:
+               gh issue create --title 'Prueba global del módulo <module>' --label integration --label "module:<module>" --body-file $BODIES/integration.md
+             - If there is one, write its new body with what must be tested now to $BODIES/integration.md and run: gh issue edit <m> --body-file $BODIES/integration.md
+             - Never pass a body inline with --body: the permission check denies any multi-line command with a line that starts with # (every Markdown heading),
+               and pipes, heredocs and command substitution are denied too. Quote --title with SINGLE quotes.
              Do NOT add the module-test label yourself; the workflow does it. Merge nothing.
              Write this line in your answer: PRUEBA-GLOBAL: #<m>
 
@@ -953,7 +962,8 @@ jobs:
                 gh pr merge <pr> --merge
                 Re-check mergeable before each one. If one unexpectedly fails, stop, mark its issue with human-review and say clearly which PRs are already merged.
 
-          Never edit files, push, or close issues by hand ("Closes #<n>" closes them). Deployment is handled by the workflow.
+          Never edit repository files, push, or close issues by hand ("Closes #<n>" closes them); the only files you may write are issue bodies in $BODIES/.
+          Deployment is handled by the workflow.
 
           The FIRST line of your answer must be exactly one of:
           FUSIÓN: COMPLETA | FUSIÓN: PARCIAL | FUSIÓN: NINGUNA | FUSIÓN: PRUEBA-GLOBAL
@@ -963,6 +973,7 @@ jobs:
           )
           ALLOWED=(
             "Read" "Grep" "Glob"
+            "Edit(/$BODIES/**)"
             "Bash(node $RUNNER_TEMP/issue-thread.mjs *)"
             "Bash(git log:*)" "Bash(git diff:*)" "Bash(git show:*)" "Bash(git fetch:*)"
             "Bash(gh issue view:*)" "Bash(gh issue list:*)" "Bash(gh issue edit:*)" "Bash(gh issue create:*)"
