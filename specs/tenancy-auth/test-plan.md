@@ -216,3 +216,4 @@ docker compose down -v --remove-orphans
 
 - 2026-11-17 — Plan de pruebas inicial (#4): casos PP-AUT-01 a PP-AUT-09 para el login con contraseña, el enlace mágico, las invitaciones, el aislamiento por organización (CA-AUT-01), la autodesactivación bloqueada y el guardián de `/admin` (CA-AUT-02).
 - 2026-11-17 — Revisión del arquitecto (#4, APROBADO): PP-AUT-07/08 fijan las credenciales exactas del seed (antes sin valor concreto); PP-AUT-07 añade la comprobación de los atributos `HttpOnly`/`SameSite` de la cookie de sesión (RNF-AUT-03).
+- 2026-11-24 — Límite de fallos y motivo de login (#20): PP-AUT-02 apunta al nuevo nombre de test; nuevos PP-AUT-10 a PP-AUT-15 (CA-AUT-06 a CA-AUT-10, RNF-AUT-04/05) y una comprobación manual del log.
