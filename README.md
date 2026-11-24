@@ -16,7 +16,7 @@ cd generic-data-collector
 
 cp .env.example .env            # ajusta los valores si lo necesitas
 
-docker compose up -d            # PostgreSQL, MinIO y Mailpit
+docker compose up -d            # PostgreSQL, MinIO y Mailpit (según COMPOSE_PROFILES)
 
 npm install                     # también genera el cliente de Prisma
 npm run db:migrate               # aplica las migraciones (ninguna todavía)
@@ -57,6 +57,23 @@ runner; si el runner migra al plugin v2, conviene unificar la sintaxis a
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
+
+PostgreSQL y MinIO se pueden desactivar para usar los servicios que ya corren
+en el servidor. Se controla en `.env` (o en las variables del environment
+`ionosL1`, de donde `deploy.yml` genera `.env`):
+
+| Variable | Servicios propios (por defecto) | Servicios externos del servidor |
+| --- | --- | --- |
+| `COMPOSE_PROFILES` | `postgres,minio` | `none` (o solo `postgres` / `minio`) |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | `formia-postgres`, `5432` | p. ej. `shared-postgres`, `5432` |
+| `S3_DOCKER_ENDPOINT` | `http://minio:9000` | p. ej. `http://shared-garage:3900` |
+| `SHARED_NETWORK` | `gallegovela-shared` | red Docker de los servicios externos |
+| `APP_PORT` | `3000` | puerto del host para la app (solo en `127.0.0.1`, detrás de nginx) |
+
+La app se une siempre a la red `SHARED_NETWORK`, así que esa red tiene que
+existir. `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `S3_ACCESS_KEY`,
+`S3_SECRET_KEY`, `S3_BUCKET` y `S3_REGION` tienen que ser los de los servicios
+externos cuando se usan.
 
 ## Estructura
 

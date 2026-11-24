@@ -21,8 +21,11 @@ cd "$(dirname "$0")/.."
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-formia-test}"
 export COMPOSE_PROJECT_NAME
 
+# Los perfiles van explícitos para que el COMPOSE_PROFILES de .env (p. ej.
+# "none" en el servidor) no deje las pruebas sin PostgreSQL ni MinIO.
 compose() {
-  docker compose -f docker-compose.yml -f docker-compose.test.yml --profile tests "$@"
+  docker compose -f docker-compose.yml -f docker-compose.test.yml \
+    --profile tests --profile postgres --profile minio "$@"
 }
 
 command="${1:-}"

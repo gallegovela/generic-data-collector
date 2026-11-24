@@ -1,6 +1,14 @@
+# PostgreSQL y MinIO solo arrancan si su perfil está activo. Se activan con
+# COMPOSE_PROFILES en .env (docker compose lo lee de ahí):
+#   COMPOSE_PROFILES=postgres,minio   -> los dos (valor de .env.example)
+#   COMPOSE_PROFILES=postgres         -> sin MinIO
+#   COMPOSE_PROFILES=none             -> ninguno (servicios externos)
+# Mailpit no tiene perfil: arranca siempre.
+# Ojo: `down` solo para los servicios de los perfiles activos.
 services:
   postgres:
     image: postgres:16
+    profiles: [postgres]
     restart: unless-stopped
     environment:
       POSTGRES_USER: formia
@@ -18,6 +26,7 @@ services:
 
   minio:
     image: minio/minio:latest
+    profiles: [minio]
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:

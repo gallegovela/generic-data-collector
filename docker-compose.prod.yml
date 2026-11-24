@@ -4,23 +4,36 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    # Solo en localhost: el tráfico de fuera entra por nginx (proxy inverso).
     ports:
-      - "3000:3000"
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
     env_file:
       - .env
     # Dentro de la red de Docker la app llega a los servicios por su
-    # nombre (postgres, minio), nunca por localhost. Estos valores pisan
-    # los de .env para que no dependan de cómo se haya rellenado.
+    # nombre, nunca por localhost. Estos valores pisan los de .env para
+    # que no dependan de cómo se haya rellenado. Por defecto apuntan a los
+    # contenedores de este fichero (formia-postgres, minio); para usar
+    # servicios externos se cambian POSTGRES_HOST, POSTGRES_PORT y
+    # S3_DOCKER_ENDPOINT en .env (ver "Servicios propios o externos").
     environment:
       NODE_ENV: production
-      DATABASE_URL: postgresql://${POSTGRES_USER:-formia}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatoria}@postgres:5432/${POSTGRES_DB:-formia}
-      S3_ENDPOINT: http://minio:9000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-formia}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD es obligatoria}@${POSTGRES_HOST:-formia-postgres}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-formia}
+      S3_ENDPOINT: ${S3_DOCKER_ENDPOINT:-http://minio:9000}
       S3_FORCE_PATH_STYLE: "true"
+    # Sin depends_on de postgres ni minio: docker-compose v1 (el del
+    # deploy) falla si una dependencia está desactivada por perfil. Si la
+    # base de datos tarda en arrancar, restart: unless-stopped reintenta.
     depends_on:
-      - postgres
-      - minio
       - mailpit
+    networks:
+      - default
+      - shared
 
+  # Servicios propios o externos
+  # ----------------------------
+  # PostgreSQL y MinIO llevan los perfiles `postgres` y `minio`, definidos
+  # en docker-compose.yml; COMPOSE_PROFILES en .env decide cuáles arrancan.
+  #
   # En producción solo la app expone puerto hacia el exterior; el resto
   # de servicios queda accesible únicamente en la red interna de Docker.
   # Las credenciales salen de .env (docker compose lo lee para interpolar
@@ -35,6 +48,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-formia}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\""]
+    # Alias propio: en la red compartida ya hay otro contenedor con el
+    # alias "postgres", y la app está en las dos redes.
+    networks:
+      default:
+        aliases: [formia-postgres]
 
   minio:
     ports: []
@@ -44,3 +62,11 @@ services:
 
   mailpit:
     ports: []
+
+networks:
+  # Red Docker ya existente donde corren los servicios externos del
+  # servidor (PostgreSQL, almacenamiento S3). La app se une siempre a
+  # ella, así que tiene que existir aunque se usen los servicios propios.
+  shared:
+    external: true
+    name: ${SHARED_NETWORK:-gallegovela-shared}
