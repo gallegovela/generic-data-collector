@@ -4,6 +4,7 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { RATE_LIMITED_CODE } from "@/lib/auth/login-error-codes";
 import { requestMagicLinkAction } from "@/server/auth/auth.actions";
 
 const inputClassName =
@@ -28,7 +29,11 @@ export function LoginForm() {
     setPending(false);
 
     if (!result || result.error) {
-      setError("Email o contraseña incorrectos.");
+      setError(
+        result?.code === RATE_LIMITED_CODE
+          ? "Demasiados intentos, prueba de nuevo más tarde."
+          : "Email o contraseña incorrectos.",
+      );
       return;
     }
 

@@ -2,10 +2,10 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { getEnv } from "@/lib/env";
 import { buildMagicLinkEmail } from "@/lib/auth/emails";
-import { RateLimitError, UnauthorizedError } from "@/lib/errors";
+import { InactiveUserError, RateLimitError, UnauthorizedError } from "@/lib/errors";
 import { sendEmail } from "@/server/integrations/email";
 import { createLoginToken, findValidLoginToken, markLoginTokenUsed } from "./login-token.repository";
-import { checkAndConsume } from "./rate-limit";
+import { isBlocked, recordFailure, reset } from "./rate-limit";
 import type { CurrentUser } from "./session";
 import { findUserByEmail } from "./user.repository";
 
@@ -39,33 +39,41 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+// Hash bcrypt fijo (10 rondas) para igualar el tiempo de respuesta cuando el
+// email no existe (RNF-AUT-02). No corresponde a ninguna contraseña real.
+const DUMMY_HASH = "$2b$10$CwTycUXWue0Thq9StjUM0uJ8.4oBxsoBwQYQAbBRHXc0vJeTgY0aO";
+
 /**
- * Verifica email + contraseña contra `User`. Aplica el límite de
- * intentos (RNF-AUT-04) por email normalizado antes de comparar.
- * Lanza RateLimitError o UnauthorizedError (credenciales inválidas o
- * usuario `inactive`). Devuelve CurrentUser.
+ * Verifica email + contraseña contra `User`. Solo cuentan los fallos
+ * (RNF-AUT-04): primero consulta el bloqueo sin consumir cupo; un fallo
+ * (también email inexistente) se registra; un acierto reinicia el
+ * contador. Lanza RateLimitError, InactiveUserError (inactivo con
+ * contraseña correcta) o UnauthorizedError. Los errores de base de datos
+ * se propagan sin registrar fallo.
  *
- * Cubre: RF-AUT-01, CA-AUT-04, RNF-AUT-01, RNF-AUT-04.
+ * Cubre: RF-AUT-01, CA-AUT-04, CA-AUT-06..09, RNF-AUT-01, RNF-AUT-04.
  */
 export async function verifyPassword(email: string, password: string): Promise<CurrentUser> {
   const key = normalizeEmail(email);
 
-  if (!checkAndConsume(key, LOGIN_RATE_LIMIT.attempts, LOGIN_RATE_LIMIT.windowMs)) {
+  if (isBlocked(key, LOGIN_RATE_LIMIT.attempts, LOGIN_RATE_LIMIT.windowMs)) {
     throw new RateLimitError();
   }
 
   const user = await findUserByEmail(key);
+  const passwordMatches = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
 
-  if (!user || user.status !== "active") {
+  if (!user || !passwordMatches) {
+    recordFailure(key, LOGIN_RATE_LIMIT.windowMs);
     throw new UnauthorizedError("Email o contraseña incorrectos.");
   }
 
-  const passwordMatches = await bcrypt.compare(password, user.passwordHash);
-
-  if (!passwordMatches) {
-    throw new UnauthorizedError("Email o contraseña incorrectos.");
+  if (user.status !== "active") {
+    recordFailure(key, LOGIN_RATE_LIMIT.windowMs);
+    throw new InactiveUserError();
   }
 
+  reset(key);
   return toCurrentUser(user);
 }
 

@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { RateLimitError, UnauthorizedError } from "@/lib/errors";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { InactiveUserError, RateLimitError, UnauthorizedError } from "@/lib/errors";
 import { prisma } from "@/server/db/client";
 
 vi.mock("@/server/integrations/email", () => ({
@@ -7,6 +7,7 @@ vi.mock("@/server/integrations/email", () => ({
 }));
 
 import { sendEmail } from "@/server/integrations/email";
+import { clearAllForTests } from "./rate-limit";
 import { createOrganization } from "./organization.repository";
 import { createLoginToken } from "./login-token.repository";
 import { createUser } from "./user.repository";
@@ -28,6 +29,10 @@ describe("auth.service", () => {
     await prisma.loginToken.deleteMany({ where: { user: { organizationId: organization.id } } });
     await prisma.user.deleteMany({ where: { organizationId: organization.id } });
     await prisma.organization.delete({ where: { id: organization.id } });
+  });
+
+  beforeEach(() => {
+    clearAllForTests();
   });
 
   async function createActiveUser(email: string, password: string) {
@@ -67,16 +72,34 @@ describe("auth.service", () => {
   });
 
   // Cubre: RF-AUT-01, CA-AUT-04
-  it("verifyPassword lanza UnauthorizedError con un usuario inactive", async () => {
+  it("verifyPassword: inactivo con contraseña correcta lanza InactiveUserError", async () => {
     const email = `inactive-${Date.now()}@test.formia.local`;
     const user = await createActiveUser(email, "Demo1234!");
     await prisma.user.update({ where: { id: user.id }, data: { status: "inactive" } });
 
+    await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(InactiveUserError);
     await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(UnauthorizedError);
   });
 
-  // Cubre: RNF-AUT-04
-  it("el 6.º intento seguido con la misma contraseña incorrecta lanza RateLimitError", async () => {
+  // Cubre: CA-AUT-09
+  it("verifyPassword: email inexistente e inactivo con contraseña incorrecta dan el mismo mensaje", async () => {
+    const email = `inactive-wrong-${Date.now()}@test.formia.local`;
+    const user = await createActiveUser(email, "Demo1234!");
+    await prisma.user.update({ where: { id: user.id }, data: { status: "inactive" } });
+
+    const messages: string[] = [];
+    for (const target of [email, `nadie-${Date.now()}@test.formia.local`]) {
+      const error = await verifyPassword(target, "incorrecta").catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UnauthorizedError);
+      expect(error).not.toBeInstanceOf(InactiveUserError);
+      messages.push((error as Error).message);
+    }
+    expect(messages[0]).toBe(messages[1]);
+    expect(messages[0]).toBe("Email o contraseña incorrectos.");
+  });
+
+  // Cubre: RNF-AUT-04, CA-AUT-08
+  it("limit: 5 fallos bloquean el 6.º intento aunque la contraseña sea correcta", async () => {
     const email = `rate-limit-${Date.now()}@test.formia.local`;
     await createActiveUser(email, "Demo1234!");
 
@@ -84,7 +107,68 @@ describe("auth.service", () => {
       await expect(verifyPassword(email, "incorrecta")).rejects.toThrow(UnauthorizedError);
     }
 
-    await expect(verifyPassword(email, "incorrecta")).rejects.toThrow(RateLimitError);
+    await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(RateLimitError);
+  });
+
+  // Cubre: RNF-AUT-04, CA-AUT-06
+  it("limit: 6 logins correctos seguidos no bloquean", async () => {
+    const email = `rate-ok-${Date.now()}@test.formia.local`;
+    await createActiveUser(email, "Demo1234!");
+
+    for (let i = 0; i < 6; i++) {
+      await expect(verifyPassword(email, "Demo1234!")).resolves.toMatchObject({ email });
+    }
+  });
+
+  // Cubre: RNF-AUT-04, CA-AUT-07
+  it("limit: un login correcto reinicia el contador", async () => {
+    const email = `rate-reset-${Date.now()}@test.formia.local`;
+    await createActiveUser(email, "Demo1234!");
+
+    for (let i = 0; i < 4; i++) {
+      await expect(verifyPassword(email, "incorrecta")).rejects.toThrow(UnauthorizedError);
+    }
+    await expect(verifyPassword(email, "Demo1234!")).resolves.toMatchObject({ email });
+
+    for (let i = 0; i < 4; i++) {
+      await expect(verifyPassword(email, "incorrecta")).rejects.toThrow(UnauthorizedError);
+    }
+    await expect(verifyPassword(email, "Demo1234!")).resolves.toMatchObject({ email });
+  });
+
+  // Cubre: RNF-AUT-04, CA-AUT-09
+  it("limit: email inexistente e inactivo también cuentan como fallo", async () => {
+    const missing = `missing-${Date.now()}@test.formia.local`;
+    for (let i = 0; i < 5; i++) {
+      await expect(verifyPassword(missing, "x")).rejects.toThrow(UnauthorizedError);
+    }
+    await expect(verifyPassword(missing, "x")).rejects.toThrow(RateLimitError);
+
+    const email = `limit-inactive-${Date.now()}@test.formia.local`;
+    const user = await createActiveUser(email, "Demo1234!");
+    await prisma.user.update({ where: { id: user.id }, data: { status: "inactive" } });
+    for (let i = 0; i < 5; i++) {
+      await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(InactiveUserError);
+    }
+    await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(RateLimitError);
+  });
+
+  // Cubre: RNF-AUT-04, CA-AUT-08
+  it("limit: la ventana de 15 minutos desbloquea el email", async () => {
+    const email = `rate-window-${Date.now()}@test.formia.local`;
+    await createActiveUser(email, "Demo1234!");
+
+    for (let i = 0; i < 5; i++) {
+      await expect(verifyPassword(email, "incorrecta")).rejects.toThrow(UnauthorizedError);
+    }
+    await expect(verifyPassword(email, "Demo1234!")).rejects.toThrow(RateLimitError);
+
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 15 * 60 * 1000 + 1000 });
+    try {
+      await expect(verifyPassword(email, "Demo1234!")).resolves.toMatchObject({ email });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Cubre: RF-AUT-02, CA-AUT-05
