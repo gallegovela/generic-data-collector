@@ -3,7 +3,7 @@
 - **Prefijo:** `AUT`
 - **Estado:** diseñado
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #1 (análisis), #4 (diseño)
+- **Issues:** #1 (análisis), #4 (diseño), #18 (análisis), #20 (límite de login y trazabilidad)
 
 ## Objetivo
 
@@ -50,7 +50,8 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 | RNF-AUT-01 | Must | Contraseñas con hash robusto (bcrypt o argon2). |
 | RNF-AUT-02 | Must | Ningún endpoint devuelve datos de otra organización, incluso adivinando identificadores. |
 | RNF-AUT-03 | Must | Sesiones con cookie `httpOnly`, `secure` y `sameSite`. |
-| RNF-AUT-04 | Should | Límite de intentos de inicio de sesión para frenar fuerza bruta. |
+| RNF-AUT-04 | Should | Límite de intentos de inicio de sesión con contraseña para frenar fuerza bruta: **solo cuentan los intentos fallidos** (contraseña incorrecta, email inexistente o usuario inactivo) por email normalizado. Con 5 fallos en 15 minutos, el email queda bloqueado hasta que el más antiguo salga de la ventana; mientras está bloqueado, ni siquiera la contraseña correcta inicia sesión. Un inicio de sesión correcto reinicia el contador de ese email; el contador también se reinicia al terminar la ventana. Los logins correctos no consumen cupo. El enlace mágico no tiene límite de intentos. |
+| RNF-AUT-05 | Should | Trazabilidad de los fallos de inicio de sesión: cada fallo (contraseña o enlace mágico) deja en el log una línea JSON con el motivo (`invalid_credentials`, `inactive_user`, `rate_limited`, `internal_error`; `invalid_token` en el enlace mágico), sin email, contraseña, token ni ningún identificador derivado del email. En `internal_error` solo se registra la clase del error, nunca su mensaje. La interfaz no permite distinguir entre email inexistente, usuario inactivo y contraseña incorrecta (RNF-AUT-02). |
 
 ## Datos
 
@@ -69,6 +70,11 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 - **CA-AUT-03** — Dada una invitación enviada, cuando el invitado abre el enlace y crea su contraseña, entonces queda en la organización con el rol indicado y con sesión iniciada.
 - **CA-AUT-04** — Dado un usuario activo con contraseña, cuando inicia sesión con el email y la contraseña correctos, entonces queda con sesión iniciada; con la contraseña incorrecta, se le informa del error sin iniciar sesión.
 - **CA-AUT-05** — Dado un usuario activo que pide un enlace mágico, cuando abre ese enlace, entonces queda con sesión iniciada; si el enlace ya se usó o ha caducado, se le informa del error sin iniciar sesión.
+- **CA-AUT-06** — Dado un usuario activo, cuando inicia sesión correctamente 5 o más veces seguidas con su email, entonces ninguno de esos inicios queda bloqueado por el límite de intentos.
+- **CA-AUT-07** — Dado un email con 4 fallos de login recientes, cuando el usuario inicia sesión correctamente, entonces el contador de ese email se reinicia (hacen falta otros 5 fallos para bloquearlo).
+- **CA-AUT-08** — Dado un email con 5 fallos de login en 15 minutos, cuando se intenta el 6.º inicio de sesión, aunque la contraseña sea correcta, entonces no se inicia sesión, se muestra «Demasiados intentos, prueba de nuevo más tarde» y se registra el motivo `rate_limited`.
+- **CA-AUT-09** — Dado un login con email inexistente, con usuario inactivo o con contraseña incorrecta, entonces la pantalla muestra exactamente el mismo mensaje en los tres casos («Email o contraseña incorrectos.»), mientras que el log distingue `invalid_credentials` de `inactive_user`.
+- **CA-AUT-10** — Dado cualquier fallo de login (contraseña o enlace mágico), entonces se escribe una única línea JSON `{"event":"auth.login_failed","provider":...,"reason":...}` que no contiene el email, la contraseña ni el token.
 
 ## Supuestos y preguntas abiertas
 
@@ -78,3 +84,4 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-17 — Diseño técnico (#4): se resuelve la pregunta sobre cuentas `collector` frente a formularios públicos (ambos); se corrige que `Organization` **no** incluye todavía los datos de tema (los añadirá `theming` en su propia migración); se reformula CA-AUT-01 para que sea comprobable ya en este módulo (usando `User` como recurso de prueba, antes de que existan `Form`/`Submission`); se deja explícito que la parte "formulario marcado como público/restringido" de RF-AUT-08 la completa `form-publishing`, y que este módulo solo entrega la infraestructura (rutas `/f/**` sin guardián de sesión); se añaden CA-AUT-04 (login con contraseña, RF-AUT-01) y CA-AUT-05 (login con enlace mágico, RF-AUT-02), que no tenían criterio propio.
+- 2026-11-24 — Login: motivo de los fallos y límite solo de fallos (#20): se reformula RNF-AUT-04 (cuenta solo fallos; un login correcto reinicia el contador; el bloqueo impide incluso la contraseña correcta); nuevo RNF-AUT-05 (trazabilidad de fallos sin datos personales); nuevos CA-AUT-06 a CA-AUT-10 (el límite no existía como criterio). No se renumera nada.

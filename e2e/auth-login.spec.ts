@@ -35,3 +35,13 @@ test("login con contraseña incorrecta se queda en /login mostrando un error", a
   await expect(page.getByText("Email o contraseña incorrectos.")).toBeVisible();
   await expect(page).toHaveURL(/\/login$/);
 });
+
+// Cubre: CA-AUT-09
+test("un email inexistente muestra el mismo mensaje que una contraseña incorrecta", async ({ page }) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(`nadie-${Date.now()}@demo.formia.local`);
+  await page.getByLabel("Contraseña").fill("contraseña-incorrecta");
+  await page.getByRole("button", { name: "Entrar" }).click();
+
+  await expect(page.getByText("Email o contraseña incorrectos.", { exact: true })).toBeVisible();
+});

@@ -48,3 +48,14 @@ export class RateLimitError extends Error {
     this.name = "RateLimitError";
   }
 }
+
+/**
+ * Usuario `inactive` con contraseña correcta. Hereda de UnauthorizedError
+ * (mismo mensaje hacia fuera) pero permite registrar el motivo real.
+ */
+export class InactiveUserError extends UnauthorizedError {
+  constructor(message = "Email o contraseña incorrectos.") {
+    super(message);
+    this.name = "InactiveUserError";
+  }
+}

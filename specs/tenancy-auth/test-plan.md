@@ -3,7 +3,7 @@
 - **Requisitos:** [README.md](README.md)
 - **Diseño:** [design.md](design.md)
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
-- **Issues:** #4 (diseño)
+- **Issues:** #4 (diseño), #20 (límite de login y trazabilidad)
 
 Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-4` de la pull request y **antes de fusionarla**.
 
@@ -47,9 +47,9 @@ npm run db:seed
 - **Precondiciones:** ninguna.
 - **Pasos:**
   ```bash
-  npx vitest run src/server/auth/auth.service.test.ts -t "RateLimitError"
+  npx vitest run src/server/auth/auth.service.test.ts -t "limit: 5 fallos"
   ```
-- **Resultado esperado:** código de salida 0; el test comprueba que el 6.º intento seguido con la misma contraseña incorrecta lanza `RateLimitError` sin llegar a comparar la contraseña.
+- **Resultado esperado:** código de salida 0 y al menos 1 test ejecutado; tras 5 fallos, el 6.º intento lanza `RateLimitError` sin llegar a comparar la contraseña. (Reformulado en #20: el filtro `-t` cambia al nuevo nombre del test; ver también PP-AUT-10 a PP-AUT-15.)
 
 ### PP-AUT-03 — Enlace mágico: generación y verificación de token
 
@@ -129,11 +129,82 @@ npm run db:seed
   ```
 - **Resultado esperado:** código de salida 0; tras fijar la contraseña en `/invite/<token>`, el test comprueba que termina con sesión iniciada (cookie de sesión presente) y en la ruta correspondiente a su rol (`/admin` si es `admin`, `/collect` si es `collector`).
 
+### PP-AUT-10 — Los logins correctos no consumen cupo y reinician el contador
+
+- **Cubre:** RNF-AUT-04, CA-AUT-06, CA-AUT-07
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** preparación (base de datos arriba).
+- **Pasos:**
+  ```bash
+  npx vitest run src/server/auth/auth.service.test.ts -t "limit: 6 logins correctos"
+  npx vitest run src/server/auth/auth.service.test.ts -t "limit: un login correcto reinicia"
+  ```
+- **Resultado esperado:** código de salida 0 en ambos y 1 test ejecutado en cada uno (la salida de Vitest no dice «no tests»): 6 logins correctos seguidos no lanzan; tras 4 fallos y 1 acierto, otros 4 fallos no bloquean el siguiente intento correcto.
+
+### PP-AUT-11 — Bloqueo tras 5 fallos y desbloqueo por ventana; email inexistente o inactivo cuentan
+
+- **Cubre:** RNF-AUT-04, CA-AUT-08, CA-AUT-09
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** preparación.
+- **Pasos:**
+  ```bash
+  npx vitest run src/server/auth/auth.service.test.ts -t "limit:"
+  npx vitest run src/server/auth/rate-limit.test.ts
+  ```
+- **Resultado esperado:** código de salida 0; 5 fallos bloquean el 6.º intento aunque la contraseña sea correcta; email inexistente e inactivo también cuentan como fallo; pasados 15 minutos (reloj simulado) el email se desbloquea; `isBlocked` no consume cupo; el `Map` respeta `MAX_TRACKED_KEYS`.
+
+### PP-AUT-12 — Distinción interna de motivos (`InactiveUserError`) sin cambiar el mensaje
+
+- **Cubre:** CA-AUT-09
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** preparación.
+- **Pasos:**
+  ```bash
+  npx vitest run src/server/auth/auth.service.test.ts -t "verifyPassword"
+  ```
+- **Resultado esperado:** código de salida 0; usuario inactivo con contraseña correcta lanza `InactiveUserError` (que es `UnauthorizedError`); contraseña incorrecta o email inexistente lanzan `UnauthorizedError` con el mismo mensaje «Email o contraseña incorrectos.».
+
+### PP-AUT-13 — Log estructurado de fallos sin datos personales
+
+- **Cubre:** RNF-AUT-05, CA-AUT-10
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** ninguna además de `npm ci` (no usa base de datos en `login-failure`).
+- **Pasos:**
+  ```bash
+  npx vitest run src/lib/auth/login-failure.test.ts src/server/auth/authorize.test.ts
+  ```
+- **Resultado esperado:** código de salida 0; una única línea JSON por fallo con `event: "auth.login_failed"`, `provider` y `reason` correctos para `invalid_credentials`, `inactive_user`, `rate_limited`, `internal_error` (con `errorClass`, sin mensaje) e `invalid_token`; la salida de `console.warn` no contiene el email ni la contraseña usados en el test; un login correcto no escribe nada.
+
+### PP-AUT-14 — Comprobación estática: no se registra el email
+
+- **Cubre:** RNF-AUT-05
+- **Tipo:** automático (shell)
+- **Precondiciones:** ninguna.
+- **Pasos:**
+  ```bash
+  ! grep -nE "console\.(log|warn|error|info)" src/server/auth/auth.service.ts src/server/auth/authorize.ts src/server/auth/rate-limit.ts
+  grep -c "console.warn" src/lib/auth/login-failure.ts
+  ! grep -rn "checkAndConsume" src
+  ```
+- **Resultado esperado:** el primer comando no encuentra nada (código 0 por la negación); el segundo imprime `1`; el tercero no encuentra referencias a `checkAndConsume` (código 0).
+
+### PP-AUT-15 — Mensajes de la pantalla de login (e2e)
+
+- **Cubre:** CA-AUT-08, CA-AUT-09
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** `npm run db:seed` ejecutado.
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/auth-login.spec.ts e2e/auth-rate-limit.spec.ts
+  ```
+- **Resultado esperado:** código de salida 0; un email inexistente y el admin del seed con contraseña incorrecta muestran exactamente «Email o contraseña incorrectos.»; tras 5 fallos con un email inventado único, el 6.º intento muestra «Demasiados intentos, prueba de nuevo más tarde.». Los tests no bloquean las cuentas del seed (usan emails inventados para el bloqueo).
+
 ## Comprobaciones manuales
 
 - [ ] El email de enlace mágico y el de invitación llegan a Mailpit (`http://localhost:8025`) con el enlace correcto y son legibles — Cubre: RF-AUT-02, RF-AUT-04.
 - [ ] El formulario de login y el de aceptar invitación se ven bien en móvil (360 px) — Cubre: RNF-AUT-01 (experiencia), consistente con CLAUDE.md "móvil primero".
 - [ ] Tras 6 intentos fallidos de login, el mensaje de "demasiados intentos" es comprensible para una persona no técnica — Cubre: RNF-AUT-04.
+- [ ] Con `npm run dev`, un login fallido deja en la consola del servidor una línea `{"event":"auth.login_failed",...}` legible y sin el email — Cubre: RNF-AUT-05.
 
 ## Limpieza
 
@@ -145,3 +216,4 @@ docker compose down -v --remove-orphans
 
 - 2026-11-17 — Plan de pruebas inicial (#4): casos PP-AUT-01 a PP-AUT-09 para el login con contraseña, el enlace mágico, las invitaciones, el aislamiento por organización (CA-AUT-01), la autodesactivación bloqueada y el guardián de `/admin` (CA-AUT-02).
 - 2026-11-17 — Revisión del arquitecto (#4, APROBADO): PP-AUT-07/08 fijan las credenciales exactas del seed (antes sin valor concreto); PP-AUT-07 añade la comprobación de los atributos `HttpOnly`/`SameSite` de la cookie de sesión (RNF-AUT-03).
+- 2026-11-24 — Límite de fallos y motivo de login (#20): PP-AUT-02 apunta al nuevo nombre de test; nuevos PP-AUT-10 a PP-AUT-15 (CA-AUT-06 a CA-AUT-10, RNF-AUT-04/05) y una comprobación manual del log.
