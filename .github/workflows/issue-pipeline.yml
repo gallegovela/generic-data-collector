@@ -282,6 +282,17 @@ jobs:
             echo "Design stage dispatched for #$CHILD"
           done
 
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ---------------------------------------------------------------------
   # Stage 2: design (analyst-programmer, supervised by the architect)
   # ---------------------------------------------------------------------
@@ -348,7 +359,8 @@ jobs:
           2. Create the module's test plan specs/<module>/test-plan.md from specs/_template/test-plan.md, or update it if it already exists, with test cases PP-<MOD>-NN
              for every acceptance criterion this issue adds or changes. It will be run in the testPR stage on the PR branch, before merging: every case must be
              executable by an agent from the command line (exact commands and a checkable expected result); anything only a person can verify goes to "Comprobaciones manuales".
-          3. Commit the specs/ changes on $BRANCH (git add specs/ && git commit -m "docs(<module>): ... (#$ISSUE_NUMBER)"). Do not push. Do not touch anything outside specs/.
+          3. Commit the specs/ changes on $BRANCH with two separate commands: git add specs/ and then git commit -m "docs(<module>): ... (#$ISSUE_NUMBER)".
+             Change files only with the Read, Edit and Write tools: scripts (python, sed, heredocs...) are denied. Do not push. Do not touch anything outside specs/.
           4. Draft the action plan for the developer: files to create or modify, signatures and contracts, step-by-step order, tests per acceptance criterion and definition of done.
           5. List any doubt or decision you need approved. Address it to the architect, who reviews your work in the next step.
 
@@ -426,7 +438,9 @@ jobs:
           Read issue #$ISSUE_NUMBER and its whole thread (node $RUNNER_TEMP/issue-thread.mjs $ISSUE_NUMBER). The last two comments are your draft and the architect's review (verdict: $VERDICT).
 
           You are in the DESIGN stage, step 3 of 3 (final). Your job:
-          1. Apply every change requested by the architect to specs/ and commit it on $BRANCH (do not push, do not touch anything outside specs/).
+          1. Apply every change requested by the architect to specs/: Read each file, then change it with the Edit tool (scripts such as python, sed or heredocs are denied).
+             Commit on $BRANCH with two separate commands: git add specs/ and then git commit -m "docs(<module>): apply architect review (#$ISSUE_NUMBER)".
+             Do not push and do not touch anything outside specs/.
              If you disagree with a point, argue it in your answer instead of ignoring it.
           2. If the thread previously had the needs-info label and the questions are now answered, remove it: gh issue edit $ISSUE_NUMBER --remove-label needs-info
           3. Write the FINAL action plan for the developer. It must be self-contained: the developer only reads this comment, CLAUDE.md and specs/.
@@ -498,6 +512,17 @@ jobs:
           else
             gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
+
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------
   # Stage 3: develop (developer)
@@ -655,6 +680,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: sh "$RUNNER_TEMP/agent-stop.sh"
+
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------
   # Stage 4: testPR (analyst-programmer), label `pr-raised`
@@ -827,6 +863,16 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" --body "Etapa testPR: $RESULT. Detalle en #$PR_NUMBER. El issue pasa a \`human-review\`: una persona tiene que revisarlo. Para repetir las pruebas, pon de nuevo \`pr-raised\`."
           fi
 
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ---------------------------------------------------------------------
   # Stage 5: merge (architect), label `merge`
@@ -1097,6 +1143,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: sh "$RUNNER_TEMP/agent-stop.sh"
 
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ---------------------------------------------------------------------
   # Stage 6: module-test (analyst-programmer), label `module-test`
   # on an `integration` issue created by the architect
@@ -1223,7 +1280,8 @@ jobs:
           You are in the MODULE-TEST stage. Your job:
           1. Write or update the section "Pruebas globales del módulo" of specs/<module>/test-plan.md, following the test-plan skill: cases PP-<MOD>-M<N>
              that test the module's pieces TOGETHER, as the architect asks. Keep the change history citing #$ISSUE_NUMBER.
-             Commit it on $BRANCH: git add specs/ && git commit -m "docs(<module>): add global module test plan (#$ISSUE_NUMBER)". Do not push.
+             Change it only with the Read, Edit and Write tools (scripts such as python, sed or heredocs are denied), then commit it on $BRANCH with two
+             separate commands: git add specs/ and then git commit -m "docs(<module>): add global module test plan (#$ISSUE_NUMBER)". Do not push.
           2. The workflow has already started the test stack (npm run test:stack:up) with this branch: app (service web), PostgreSQL, MinIO and Mailpit in containers.
              Skip that step of the "Preparación", run the rest, the "Comprobaciones generales" and every PP-<MOD>-M case exactly as written, all inside
              the stack's tests container: npm run test:stack:run -- <command>. Use npm run test:stack:logs -- <service> to explain a failure.
@@ -1292,3 +1350,14 @@ jobs:
           gh label create module-test-done --color c2e0c6 --description "Prueba global terminada: la analiza el arquitecto" 2>/dev/null || true
           gh issue edit "$ISSUE_NUMBER" --remove-label module-test --add-label module-test-done
           gh workflow run issue-pipeline.yml --ref "$DEFAULT_BRANCH" -f issue="$ISSUE_NUMBER" -f stage=merge
+
+      # Agent transcripts (stream-json, secrets redacted by run-agent.mjs)
+      # to diagnose denied tools or wrong answers from the Actions tab.
+      - name: Upload the agent transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-transcripts-${{ github.job }}-issue-${{ env.ISSUE_NUMBER }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-transcripts/
+          retention-days: 7
+          if-no-files-found: ignore

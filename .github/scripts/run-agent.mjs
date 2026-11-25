@@ -32,8 +32,14 @@
 //      <answer-file> and $RUNNER_TEMP/agent-stopped.md hold the answer with
 //      a note (in Spanish) on top. Later steps check agent-state so nothing
 //      moves on; .github/scripts/agent-stop.sh labels the issue.
+//
+// For diagnosis, it logs the Claude Code version and every permission
+// denial, and saves the agent's whole stream-json transcript to
+// $RUNNER_TEMP/agent-transcripts/, which the workflow uploads as an
+// artifact. The repository is public, so every value of an environment
+// variable whose name looks like a secret is redacted first.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -55,7 +61,11 @@ ESTADO: BLOQUEADO
 - PREGUNTA: you cannot go on without a decision of a PERSON (the product owner). Your answer must contain the numbered questions, each with a default proposal.
 - BLOQUEADO: you could not finish the stage: a tool or permission was denied, a command kept failing, specs/ or the plan is contradictory, or anything else left the work incomplete. Explain what is missing and how to unblock it.
 
-When in doubt between COMPLETADO and BLOQUEADO, answer BLOQUEADO: the next stage starts automatically from COMPLETADO, and it must never start from incomplete work. Do not try to work around a denied tool by other means. Do not put anything after the status line.
+When in doubt between COMPLETADO and BLOQUEADO, answer BLOQUEADO: the next stage starts automatically from COMPLETADO, and it must never start from incomplete work. Do not put anything after the status line.
+
+# Herramientas
+
+Only the tools and commands the workflow allows are available; anything else is denied without asking. Change files only with the Read, Edit and Write tools, never with scripts (python, node, sed, awk, heredocs, redirections). Run git and gh commands one at a time, exactly as the stage prompt shows them (for example git add specs/ and then git commit -m "..."). If a call is denied, retry it once the right way (Edit for a file, a single plain command for git or gh); if the right way is denied too, stop and answer BLOQUEADO, naming the denied call. Never claim that a tool was denied unless you called it and got a denial.
 `.trim();
 
 const STATES = ["COMPLETADO", "PREGUNTA", "BLOQUEADO"];
@@ -128,6 +138,25 @@ const DENIED_TOOLS = [
 
 let denials = [];
 
+const version = spawnSync("claude", ["--version"], { encoding: "utf8" });
+console.error(`[run-agent] Claude Code ${(version.stdout || version.stderr || "version unknown").trim()}`);
+
+// Transcript: one file per agent run, named after the answer file and the
+// agent (e.g. 1732485672000-plan-analyst-programmer.jsonl).
+const SECRET_NAME = /TOKEN|SECRET|KEY|PASSWORD|PASS|CREDENTIAL|AUTH/i;
+const secrets = Object.entries(process.env)
+  .filter(([name, value]) => SECRET_NAME.test(name) && value && value.length >= 8)
+  .map(([, value]) => value)
+  .sort((a, b) => b.length - a.length);
+const redact = (line) => secrets.reduce((acc, s) => acc.split(s).join("***"), line);
+const agentIdx = claudeArgs.indexOf("--agent");
+const agentName = agentIdx >= 0 ? claudeArgs[agentIdx + 1] : "agent";
+const transcriptDir = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "agent-transcripts");
+fs.mkdirSync(transcriptDir, { recursive: true });
+const transcriptFile = path.join(transcriptDir, `${Date.now()}-${path.basename(answerFile, path.extname(answerFile))}-${agentName}.jsonl`);
+const transcript = fs.createWriteStream(transcriptFile);
+console.error(`[run-agent] Transcript: ${transcriptFile}`);
+
 const child = spawn("claude", [...claudeArgs, "--append-system-prompt", STATUS_PROTOCOL, "--disallowedTools", ...DENIED_TOOLS, "--output-format", "stream-json", "--verbose"], {
   stdio: ["ignore", "pipe", "inherit"],
 });
@@ -161,6 +190,7 @@ function checkUsage(info) {
 }
 
 readline.createInterface({ input: child.stdout }).on("line", (line) => {
+  transcript.write(`${redact(line)}\n`);
   let event;
   try {
     event = JSON.parse(line);
@@ -191,7 +221,10 @@ function formatReset(epochSeconds) {
   }) + ` (${process.env.AGENT_TIME_ZONE || "Europe/Madrid"})`;
 }
 
-child.on("close", (code) => {
+// Waits for the transcript to be flushed before exiting.
+child.on("close", (code) => transcript.end(() => finish(code)));
+
+function finish(code) {
   // A request rejected before any usage event: the CLI ends with an error
   // answer and the last known window is the one that ran out.
   if (!stopped && answerIsError && /limit/i.test(answer)) {
@@ -267,4 +300,4 @@ child.on("close", (code) => {
   fs.writeFileSync(stoppedFile, note);
   fs.writeFileSync(stateFile, finalState);
   process.exit(EXIT_AGENT_STOPPED);
-});
+}
