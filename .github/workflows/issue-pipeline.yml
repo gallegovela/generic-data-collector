@@ -12,6 +12,13 @@ name: Issue pipeline
 # stage posts a note with the reset time, keeps the issue's label and does
 # not hand over; a comment on the issue re-runs it.
 #
+# Every agent ends its answer with `ESTADO: COMPLETADO | PREGUNTA |
+# BLOQUEADO` (run-agent.mjs adds the protocol to its system prompt). Only
+# COMPLETADO lets the stage go on. PREGUNTA, BLOQUEADO or a missing line
+# make run-agent exit with code 78 and write $RUNNER_TEMP/agent-state:
+# the stage posts the agent's answer, .github/scripts/agent-stop.sh adds
+# `needs-info` or `human-review`, and nothing is handed over.
+#
 # analysis -> architect. Reviews the request against the whole project,
 #             argues the architecture, points out errors and improvements,
 #             and creates one child issue per development piece. Read-only
@@ -175,6 +182,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       # Children are found through "Padre: #<n>" in their body, with the
       # list API (the search API lags behind newly created issues).
@@ -243,6 +252,15 @@ jobs:
           [ -s /tmp/analysis.md ] || echo "⚠️ La etapa de análisis ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/analysis.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/analysis.md
 
+      # The agent stopped the stage (ESTADO: PREGUNTA or BLOQUEADO): its
+      # answer is already posted above; label the issue. The step below
+      # does not run, so no child starts.
+      - name: Report an agent stop
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh "$RUNNER_TEMP/agent-stop.sh"
+
       # Labels set with GITHUB_TOKEN do not trigger runs, so the design
       # stage of every child created in this run is dispatched here. Only
       # new open children: the ones that existed before are already in
@@ -296,6 +314,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       - name: Configure git remote and identity
         env:
@@ -471,6 +491,10 @@ jobs:
         run: |
           if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
             gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+          elif [ -f "$RUNNER_TEMP/agent-state" ]; then
+            # An agent stopped the stage: none of the comment steps after
+            # it ran, so its answer is posted here.
+            sh "$RUNNER_TEMP/agent-stop.sh" --comment
           else
             gh issue comment "$ISSUE_NUMBER" --body "⚠️ La etapa de diseño ha fallado. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           fi
@@ -510,6 +534,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       - name: Configure git remote and identity
         env:
@@ -589,6 +615,10 @@ jobs:
             echo "Stopped by the subscription usage limit; no hand-over."
             exit 0
           fi
+          if [ -f "$RUNNER_TEMP/agent-state" ]; then
+            echo "The developer stopped the stage ($(cat "$RUNNER_TEMP/agent-state")); no hand-over."
+            exit 0
+          fi
           PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           LABELS=$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')
           if [ -z "$PR" ]; then
@@ -617,6 +647,14 @@ jobs:
         run: |
           [ -s /tmp/develop.md ] || echo "⚠️ La etapa de desarrollo ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/develop.md
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/develop.md
+
+      # The developer stopped the stage (ESTADO: PREGUNTA or BLOQUEADO):
+      # its answer is already posted above; label the issue.
+      - name: Report an agent stop
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh "$RUNNER_TEMP/agent-stop.sh"
 
   # ---------------------------------------------------------------------
   # Stage 4: testPR (analyst-programmer), label `pr-raised`
@@ -655,6 +693,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       - name: Find the pull request
         id: pr
@@ -753,7 +793,8 @@ jobs:
           if [ -f scripts/test-stack.sh ]; then sh scripts/test-stack.sh down || true; fi
 
       # Only SUPERADO moves the issue to `merge`. Anything else (FALLIDO,
-      # BLOQUEADO, a crash with no result line) goes to `human-review`.
+      # BLOQUEADO, a crash with no result line, an agent that stopped the
+      # stage with ESTADO: PREGUNTA or BLOQUEADO) goes to `human-review`.
       # A stop for the usage limit keeps `pr-raised`.
       - name: Post result and set the next label
         if: always() && steps.pr.outputs.number != ''
@@ -769,6 +810,11 @@ jobs:
           gh pr comment "$PR_NUMBER" --body-file /tmp/testpr.md
           RESULT=$(grep -oE 'RESULTADO: (SUPERADO|FALLIDO|BLOQUEADO)' /tmp/testpr.md | head -1 | cut -d' ' -f2)
           RESULT=${RESULT:-SIN_RESULTADO}
+          # The agent stopped the stage (ESTADO: PREGUNTA or BLOQUEADO):
+          # never `merge`, whatever its result line says.
+          if [ -f "$RUNNER_TEMP/agent-state" ]; then
+            RESULT=BLOQUEADO
+          fi
 
           gh label create merge --color 0e8a16 --description "Plan de pruebas superado: etapa merge" 2>/dev/null || true
           gh label create human-review --color d93f0b --description "Necesita revisión de una persona" 2>/dev/null || true
@@ -819,6 +865,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       # Deterministic gate, no agent involved. A module is merged in one
       # single step, so EVERY open issue sharing a `module:<x>` label with
@@ -990,6 +1038,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ -f "$RUNNER_TEMP/agent-state" ]; then
+            echo "The architect stopped the stage ($(cat "$RUNNER_TEMP/agent-state")); no hand-over."
+            exit 0
+          fi
           M=$(grep -oE 'PRUEBA-GLOBAL: #[0-9]+' /tmp/merge.md 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)
           [ -n "$M" ] || exit 0
           gh label create integration --color 1d76db --description "Issue de prueba global de un módulo" 2>/dev/null || true
@@ -1036,6 +1088,15 @@ jobs:
           fi
           gh issue comment "$ISSUE_NUMBER" --body-file /tmp/merge.md
 
+      # The architect stopped the stage (ESTADO: PREGUNTA or BLOQUEADO):
+      # its answer is already posted above; label the issue. Whatever it
+      # merged before stopping is still deployed by the step above.
+      - name: Report an agent stop
+        if: failure() && steps.gate.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh "$RUNNER_TEMP/agent-stop.sh"
+
   # ---------------------------------------------------------------------
   # Stage 6: module-test (analyst-programmer), label `module-test`
   # on an `integration` issue created by the architect
@@ -1071,6 +1132,8 @@ jobs:
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/run-agent.mjs"
           gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/issue-thread.mjs?ref=$GITHUB_SHA" \
             -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/issue-thread.mjs"
+          gh api "repos/$GITHUB_REPOSITORY/contents/.github/scripts/agent-stop.sh?ref=$GITHUB_SHA" \
+            -H "Accept: application/vnd.github.raw" > "$RUNNER_TEMP/agent-stop.sh"
 
       - name: Configure git remote and identity
         env:
@@ -1199,6 +1262,7 @@ jobs:
           MODULES: ${{ steps.module.outputs.modules }}
         run: |
           [ ! -f "$RUNNER_TEMP/usage-limit.md" ] || exit 0
+          [ ! -f "$RUNNER_TEMP/agent-state" ] || exit 0
           git push --force origin "$BRANCH"
           if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')" ]; then
             gh pr create --base "$DEFAULT_BRANCH" --head "$BRANCH" \
@@ -1215,6 +1279,12 @@ jobs:
         run: |
           if [ -f "$RUNNER_TEMP/usage-limit.md" ]; then
             gh issue comment "$ISSUE_NUMBER" --body-file "$RUNNER_TEMP/usage-limit.md"
+            exit 0
+          fi
+          # The analyst stopped the stage (ESTADO: PREGUNTA or BLOQUEADO):
+          # post its answer, label the issue and do not hand back to merge.
+          if [ -f "$RUNNER_TEMP/agent-state" ]; then
+            sh "$RUNNER_TEMP/agent-stop.sh" --comment
             exit 0
           fi
           [ -s /tmp/moduletest.md ] || echo "⚠️ La etapa module-test ha fallado sin respuesta. Revisa el log de la ejecución: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" > /tmp/moduletest.md
