@@ -24,6 +24,12 @@ export const envSchema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
   S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true),
+  // file-storage (#25): host con el que se firman las URLs que abre el
+  // navegador (por defecto, S3_ENDPOINT), tamaño máximo de subida y vida
+  // de la URL firmada (máximo 900 s, RF-STO-02).
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
+  STORAGE_MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(10485760),
+  STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(1).max(900).default(900),
   AUTH_SECRET: z.string().min(32),
   AUTH_URL: z.string().url().default("http://localhost:3000"),
   SMTP_HOST: z.string().min(1).default("localhost"),

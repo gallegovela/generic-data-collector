@@ -32,6 +32,7 @@ model Organization {
   invitations Invitation[]
   forms       Form[]
   submissions Submission[]
+  storedFiles StoredFile[]
 
   @@map("organizations")
 }
@@ -128,4 +129,32 @@ model Submission {
   @@unique([organizationId, clientId])
   @@index([organizationId, formId, capturedAt])
   @@map("submissions")
+}
+
+enum StoredFileKind {
+  photo
+  signature
+  document
+}
+
+// file-storage (#25): metadatos de los archivos guardados en S3. Sin clave
+// foránea a Submission (submissionId es un identificador lógico; null =
+// huérfano; ver specs/file-storage/design.md).
+model StoredFile {
+  id             String         @id @default(cuid())
+  organizationId String
+  key            String         @unique
+  uploadId       String
+  kind           StoredFileKind
+  contentType    String
+  sizeBytes      Int
+  submissionId   String?
+  createdAt      DateTime       @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, uploadId])
+  @@index([organizationId, submissionId])
+  @@index([submissionId, createdAt])
+  @@map("stored_files")
 }
