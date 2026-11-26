@@ -19,6 +19,15 @@ export function buildDailyReportFormVersion(): FormVersion {
   };
 }
 
+/** Versión 2: la v1 más el campo de texto `weather` ("Tiempo"). Cubre: CA-OUT-04 */
+export function buildDailyReportFormVersionV2(): FormVersion {
+  const v1 = buildDailyReportFormVersion();
+  return {
+    ...v1,
+    fields: [...v1.fields, { id: "weather", type: "text", label: "Tiempo", required: false, config: {} }],
+  };
+}
+
 export type SampleSubmission = {
   formId: string;
   formTitle: string;

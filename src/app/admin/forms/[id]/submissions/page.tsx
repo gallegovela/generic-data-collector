@@ -1,3 +1,4 @@
+import { ExportButtons } from "@/components/outputs/export-buttons";
 import { SubmissionFiltersBar } from "@/components/submissions-dashboard/submission-filters-bar";
 import { SubmissionsTable } from "@/components/submissions-dashboard/submissions-table";
 import { submissionFiltersSchema } from "@/lib/submissions-dashboard/submission-filters.schema";
@@ -39,6 +40,7 @@ export default async function SubmissionsPage({
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Respuestas</h1>
       <SubmissionFiltersBar formId={id} values={filters} filterableFields={result.filterableFields} />
+      {result.total > 0 ? <ExportButtons formId={id} query={queryWithoutPage} /> : null}
       <SubmissionsTable formId={id} result={result} query={queryWithoutPage} />
     </div>
   );

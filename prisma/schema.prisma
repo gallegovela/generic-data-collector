@@ -119,6 +119,7 @@ model Submission {
   formVersionSnapshot Json
   answers             Json
   submittedByName     String?
+  formVersionNumber   Int?
   capturedAt          DateTime
   syncedAt            DateTime @default(now())
   createdAt           DateTime @default(now())

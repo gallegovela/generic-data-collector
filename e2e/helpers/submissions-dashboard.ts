@@ -1,3 +1,4 @@
+import type { FormVersion } from "@/lib/form-schema";
 import { findUserByEmail } from "@/server/auth/user.repository";
 import { prisma } from "@/server/db/client";
 import { createSubmissionFixture } from "@/server/submissions/submission.repository";
@@ -18,15 +19,23 @@ export async function addSubmission(
   organizationId: string,
   formId: string,
   n: number,
-  opts: { answers?: Record<string, unknown>; capturedAt?: Date; by?: string; title?: string } = {},
+  opts: {
+    answers?: Record<string, unknown>;
+    capturedAt?: Date;
+    by?: string;
+    title?: string;
+    formVersion?: FormVersion;
+    formVersionNumber?: number;
+  } = {},
 ) {
   return createSubmissionFixture(organizationId, {
     formId,
     formTitle: opts.title ?? DAILY_REPORT_FORM_TITLE,
     clientId: `${formId}-${n}`,
-    formVersionSnapshot: buildDailyReportFormVersion(),
+    formVersionSnapshot: opts.formVersion ?? buildDailyReportFormVersion(),
     answers: opts.answers ?? { site: `Obra ${n}`, has_incidents: false },
     submittedByName: opts.by ?? "Ana Encargada",
+    formVersionNumber: opts.formVersionNumber,
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
   });
 }
