@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { FormEditor } from "@/components/form-editor/form-editor";
 import { DraftFormSchema } from "@/lib/form-editor/form-editor.schema";
 import { requireAdminPage } from "@/server/auth/session";
+import { getPublishingState } from "@/server/form-publishing/form-publishing.service";
 import { findFormById } from "@/server/forms/form.repository";
 
 export const dynamic = "force-dynamic";
@@ -19,5 +20,14 @@ export default async function FormEditorPage({ params }: { params: Promise<{ id:
   const parsed = DraftFormSchema.safeParse(form.draftSchema);
   const draft = parsed.success ? parsed.data : { title: form.name, fields: [] };
 
-  return <FormEditor formId={form.id} formName={form.name} initialDraft={draft} />;
+  const publishingState = await getPublishingState(user.organizationId, form.id);
+
+  return (
+    <FormEditor
+      formId={form.id}
+      formName={form.name}
+      initialDraft={draft}
+      publishingState={publishingState}
+    />
+  );
 }

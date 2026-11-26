@@ -12,7 +12,10 @@ export function AutosaveIndicator({ status, fields }: { status: AutosaveStatus; 
 
   if (status.phase === "saving") text = "Guardando…";
   else if (status.phase === "saved") text = "Guardado";
-  else if (status.phase === "invalid") {
+  else if (status.phase === "error") {
+    tone = "text-destructive";
+    text = "No se pudo guardar el borrador.";
+  } else if (status.phase === "invalid") {
     tone = "text-destructive";
     const first = status.issues[0];
     const label = first ? fields.find((f) => f.id === first.fieldId)?.label : undefined;
