@@ -33,3 +33,33 @@ test("listado: paginación, filtro sí/no y apertura de ficha", async ({ page })
   await expect(page).toHaveURL(new RegExp(`/admin/forms/${formId}/submissions/[^/]+$`));
   await expect(page.getByText("Obra 3")).toBeVisible();
 });
+
+const versionFormId = uniqueFormId("version");
+
+test.describe("versiones", () => {
+  test.beforeAll(async () => {
+    const org = await demoOrganizationId();
+    await addSubmission(org, versionFormId, 0, { version: 1 });
+    await addSubmission(org, versionFormId, 1, { version: 2 });
+    await addSubmission(org, versionFormId, 2, { version: 2 });
+    await addSubmission(org, versionFormId, 3); // anterior a #27: sin versión
+  });
+  test.afterAll(async () => deleteSubmissionsOfForms([versionFormId]));
+
+  // Cubre: CA-SUB-14, RF-SUB-12
+  test("CA-SUB-14: el listado muestra la versión y se filtra por ella", async ({ page }) => {
+    await login(page);
+    await page.goto(`/admin/forms/${versionFormId}/submissions`);
+    await expect(page.getByTestId("submission-row")).toHaveCount(4);
+    await expect(page.getByTestId("submission-version").filter({ hasText: "—" })).toHaveCount(1);
+
+    await page.goto(`/admin/forms/${versionFormId}/submissions?version=2`);
+    await expect(page.getByTestId("submission-row")).toHaveCount(2);
+    await expect(page.getByTestId("submission-version").filter({ hasText: "v2" })).toHaveCount(2);
+
+    await page.goto(`/admin/forms/${versionFormId}/submissions`);
+    await page.getByLabel("Versión").selectOption({ label: "v1" });
+    await page.getByRole("button", { name: "Filtrar" }).click();
+    await expect(page.getByTestId("submission-row")).toHaveCount(1);
+  });
+});

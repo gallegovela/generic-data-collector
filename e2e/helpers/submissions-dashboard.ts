@@ -18,7 +18,13 @@ export async function addSubmission(
   organizationId: string,
   formId: string,
   n: number,
-  opts: { answers?: Record<string, unknown>; capturedAt?: Date; by?: string; title?: string } = {},
+  opts: {
+    answers?: Record<string, unknown>;
+    capturedAt?: Date;
+    by?: string;
+    title?: string;
+    version?: number;
+  } = {},
 ) {
   return createSubmissionFixture(organizationId, {
     formId,
@@ -28,6 +34,9 @@ export async function addSubmission(
     answers: opts.answers ?? { site: `Obra ${n}`, has_incidents: false },
     submittedByName: opts.by ?? "Ana Encargada",
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
+    ...(opts.version === undefined
+      ? {}
+      : { formVersionId: `v${opts.version}`, formVersionNumber: opts.version }),
   });
 }
 

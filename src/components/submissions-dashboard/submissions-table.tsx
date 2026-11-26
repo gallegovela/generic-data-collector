@@ -39,6 +39,7 @@ export function SubmissionsTable({
           <TableRow>
             <TableHead>Fecha</TableHead>
             <TableHead>Enviado por</TableHead>
+            <TableHead>Versión</TableHead>
             <TableHead className="text-right">Ficha</TableHead>
           </TableRow>
         </TableHeader>
@@ -47,6 +48,9 @@ export function SubmissionsTable({
             <TableRow key={item.id} data-testid="submission-row">
               <TableCell>{item.capturedAt.toLocaleString("es-ES")}</TableCell>
               <TableCell>{item.submittedByName ?? "—"}</TableCell>
+              <TableCell data-testid="submission-version">
+                {item.formVersionNumber === null ? "—" : `v${item.formVersionNumber}`}
+              </TableCell>
               <TableCell className="text-right">
                 <Link href={`/admin/forms/${formId}/submissions/${item.id}`} className="underline">
                   Ver

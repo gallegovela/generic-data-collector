@@ -9,10 +9,12 @@ export function SubmissionFiltersBar({
   formId,
   values,
   filterableFields,
+  versions = [],
 }: {
   formId: string;
   values: Partial<SubmissionFiltersInput>;
   filterableFields: Field[];
+  versions?: number[];
 }) {
   const selected = filterableFields.find((f) => f.id === values.fieldId);
   return (
@@ -33,6 +35,19 @@ export function SubmissionFiltersBar({
         Buscar texto
         <input type="search" name="q" defaultValue={values.q} className={inputClass} />
       </label>
+      {versions.length > 0 ? (
+        <label className="flex flex-col gap-1 text-sm">
+          Versión
+          <select name="version" defaultValue={values.version ? String(values.version) : ""} className={inputClass}>
+            <option value="">(todas)</option>
+            {versions.map((v) => (
+              <option key={v} value={String(v)}>
+                {`v${v}`}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       {filterableFields.length > 0 ? (
         <>
           <label className="flex flex-col gap-1 text-sm">
