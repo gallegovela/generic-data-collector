@@ -93,6 +93,7 @@ sequenceDiagram
 ## Dependencias
 
 - Depende de: [`form-schema`](../form-schema/README.md) (tipos y validación de campos), [`tenancy-auth`](../tenancy-auth/README.md) (sesión, rol admin, `organizationId`). `theming` y `ai-assistant` no tienen issue propio todavía: se usan un tema por defecto fijo y un hueco de interfaz sin lógica respectivamente (ver "Supuestos y preguntas abiertas").
+- Lee (solo recuento, desde #34): `Submission` de [`submissions-dashboard`](../submissions-dashboard/README.md) y `Form.slug` de `form-publishing`. Si esos módulos cambian el modelo, hay que revisar `listFormsByOrganization`.
 - Lo usan: form-publishing (toma el borrador validado para crear la primera `FormVersion` al publicar).
 
 ## Criterios de aceptación
@@ -124,5 +125,5 @@ sequenceDiagram
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-17 — Diseño técnico (#6): añadidas las secciones "Actores", "Flujos principales", "Datos" y "Supuestos y preguntas abiertas"; añadidos CA-EDT-04 a CA-EDT-08 (crear, duplicar, archivar, bloqueo de guardado con campo inválido, reordenar con teclado), necesarios para cubrir de forma verificable RF-EDT-01, RF-EDT-02, RF-EDT-04 y RF-EDT-10; documentado que `Form.draftSchema` usa un `DraftFormSchema` propio (sin mínimo de campos) en vez de reutilizar `FormVersionSchema` entero, y que las columnas de "versión publicada" y "número de respuestas" son placeholders fijos hasta que existan `form-publishing`/`submissions-dashboard`.
-- 2026-11-26 — #34: añadidos RF-EDT-13 (acción «Rellenar» en el listado) y RF-EDT-14 (contador de respuestas real, una consulta agrupada) con CA-EDT-13 a CA-EDT-15. Sustituyen el placeholder «siempre 0» de RF-EDT-01 y CA-EDT-04 (que sigue valiendo: un formulario nuevo tiene 0 respuestas); `Submission` ya existe (#7), así que la columna deja de ser un placeholder. Nota: la «versión publicada» real ya la aporta `form-publishing` (#26).
 - 2026-11-17 — Revisión del arquitecto (#6): añadidos CA-EDT-09 a CA-EDT-12 (añadir campo desde la paleta, editar propiedades, eliminar/duplicar sin referencias, condición de visibilidad válida) para cubrir de forma verificable RF-EDT-03, RF-EDT-05, RF-EDT-06 y RF-EDT-07, que no tenían ningún criterio trazable.
+- 2026-11-26 — #34: añadidos RF-EDT-13 (acción «Rellenar» en el listado) y RF-EDT-14 (contador de respuestas real, una consulta agrupada) con CA-EDT-13 a CA-EDT-15. Sustituyen el placeholder «siempre 0» de RF-EDT-01 y CA-EDT-04 (que sigue valiendo: un formulario nuevo tiene 0 respuestas); `Submission` ya existe (#7), así que la columna deja de ser un placeholder. Nota: la «versión publicada» real ya la aporta `form-publishing` (#26).

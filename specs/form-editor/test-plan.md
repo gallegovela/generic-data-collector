@@ -5,7 +5,7 @@
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
 - **Issues:** #6, #34
 
-Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-6` de la pull request y **antes de fusionarla**. Necesita PostgreSQL (`Form` es una tabla real) pero no MinIO ni Mailpit: este módulo no sube archivos ni envía email.
+Este plan se ejecuta en la etapa `testPR`, sobre la rama de la PR (`issue-<n>`) y **antes de fusionarla**. Necesita PostgreSQL (`Form` es una tabla real) pero no MinIO ni Mailpit: este módulo no sube archivos ni envía email.
 
 ## Preparación
 
@@ -233,5 +233,5 @@ docker compose down -v --remove-orphans
 ## Historial de cambios
 
 - 2026-11-17 — Plan de pruebas inicial (#6): PP-EDT-01 a PP-EDT-09, uno por cada CA-EDT-01 a CA-EDT-08 más el aislamiento multi-tenant transversal.
-- 2026-11-26 — #34: PP-EDT-14 a PP-EDT-16 para CA-EDT-13 a CA-EDT-15 (acción «Rellenar» y contador real). Comprobación manual añadida.
 - 2026-11-17 — Revisión del arquitecto (#6): PP-EDT-10 a PP-EDT-13, uno por cada CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06 y 07, que no tenían ningún caso trazable).
+- 2026-11-26 — #34: PP-EDT-14 a PP-EDT-16 para CA-EDT-13 a CA-EDT-15 (acción «Rellenar» y contador real). Comprobación manual añadida. Revisión del arquitecto: el plan se ejecuta sobre la rama de cada PR.

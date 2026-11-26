@@ -463,11 +463,14 @@ export function getFillAction(form: { status: FormStatus; slug: string | null })
 | CA-EDT-15 | Vitest | `src/server/forms/form.repository.test.ts` — dos organizaciones con respuestas, 3 respuestas en un formulario de A, 0 en otro; título con «CA-EDT-15» |
 | CA-EDT-13, CA-EDT-14, CA-EDT-15 | Playwright | `e2e/form-editor-listing.spec.ts` — nuevos tests con títulos «CA-EDT-13», «CA-EDT-14», «CA-EDT-15» |
 
+Dependencia: `form-editor` **lee** `Submission` (de `submissions-dashboard`) solo para el recuento; si ese módulo cambia el modelo, hay que revisar este repositorio.
+
+Datos de Playwright (CA-EDT-13 y CA-EDT-15): se siembran con Prisma desde el test, con un `slug` único por ejecución (el campo es `@unique`, evita colisiones con el seed) y se borran en `afterAll`. En CA-EDT-14 el texto de `reason` se comprueba con `getByText` dentro del menú abierto.
+
 Actualizar los mocks de `src/server/forms/form.service.test.ts` (líneas con `responseCount: 0`) para incluir `slug: null`.
 
 ## Historial de cambios
 
-- 2026-11-26 — Diseño de #34: acción «Rellenar» (`getFillAction`, enlace a `/f/<slug>` solo si publicado y con slug), `FormSummary.slug` y contador real con `submission.groupBy` en una sola consulta.
-
 - 2026-11-17 — Diseño inicial (#6): modelo `Form` propio (sin `FormVersion`/`Submission`), `DraftFormSchema` sin mínimo de campos, editor con `@dnd-kit`, placeholders para tema real y asistente de IA.
 - 2026-11-17 — Revisión del arquitecto (#6): cobertura de tests para CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06, 07); `mapDraftIssuesToFields` tipado con `z.ZodError` en vez de `z.core.$ZodIssue[]`, para no depender de un tipo interno de `zod`; aclarado que `mobile-preview.tsx` lista todos los campos sin evaluar `visibleIf`, marcando los condicionales con una insignia.
+- 2026-11-26 — Diseño de #34: acción «Rellenar» (`getFillAction`, enlace a `/f/<slug>` solo si publicado y con slug), `FormSummary.slug` y contador real con `submission.groupBy` en una sola consulta. Revisión del arquitecto: dependencia de lectura de `Submission` anotada; datos de Playwright sembrados con slug único y limpiados en `afterAll`.
