@@ -45,7 +45,6 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 | RF-SUB-09 | Must | Tras guardar una respuesta, se disparan las salidas configuradas para el formulario. |
 | RF-SUB-10 | Should | Un panel de inicio (`/admin`) muestra el número de respuestas de hoy, de la semana y por formulario. |
 | RF-SUB-11 | Must | Cada respuesta guarda una copia inmutable del esquema (`FormVersion` de `form-schema`) con el que se rellenó, para mostrar siempre las etiquetas correctas aunque el formulario cambie después. |
-
 | RF-SUB-12 | Must | Cada respuesta indica la versión del formulario con la que se recogió (id y número, opcionales en respuestas anteriores a #27), el listado la muestra y se puede filtrar por ella. (#27) |
 
 ## Requisitos no funcionales

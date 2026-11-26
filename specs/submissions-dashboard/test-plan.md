@@ -218,7 +218,7 @@ npm run db:migrate
   ```bash
   npx vitest run src/server/submissions/submission.service.test.ts src/lib/submissions-dashboard/create-submission.schema.test.ts -t "limites|autor|fechas|isOwnFileKey"
   ```
-- **Resultado esperado:** código de salida 0; `answers` de más de 256 KiB rechazado; claves de otra organización o con `..` rechazadas y la propia aceptada; el actor `user` guarda `submittedByUserId` y `submittedByName`, el anónimo `null`; `capturedAt` se guarda tal cual y `syncedAt` lo rellena el servidor.
+- **Resultado esperado:** código de salida 0 y **al menos 10 tests ejecutados** (si Vitest informa de 0 tests o de "no tests found", el caso es ❌ aunque el código de salida sea 0); `answers` de más de 256 KiB rechazado; array de fotos con una clave ajena entre propias y firma ajena rechazados; claves con `..`, de otra organización o con prefijo parecido (`org/abcd/` frente a `org/abc/`) rechazadas y la propia aceptada; el actor `user` guarda `submittedByUserId` y `submittedByName`, el anónimo `null`; `capturedAt` se guarda tal cual y `syncedAt` lo rellena el servidor.
 
 ### PP-SUB-18 — Versión en el listado y filtro por versión
 
@@ -239,10 +239,10 @@ npm run db:migrate
 - **Precondiciones:** Preparación ya ejecutada.
 - **Pasos:**
   ```bash
-  npx prisma migrate status
-  docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c '\d submissions' | grep -E 'formVersionId|formVersionNumber|submittedByUserId'
+  npm run test:stack:run -- npx prisma migrate status
+  npm run test:stack:run -- sh -c "psql \"\$DATABASE_URL\" -c '\\d \"Submission\"' | grep -E 'formVersionId|formVersionNumber|submittedByUserId'"
   ```
-- **Resultado esperado:** `migrate status` informa "Database schema is up to date"; el `grep` muestra las tres columnas sin `not null`. (Si el servicio de `docker-compose.yml` o las variables se llaman distinto, el ejecutor las adapta y lo anota.)
+- **Resultado esperado:** `migrate status` informa "Database schema is up to date"; el `grep` muestra las tres columnas sin `not null`. (Si el nombre de la tabla o la disponibilidad de `psql` en el entorno difieren, el ejecutor lo adapta y lo anota.)
 
 ## Comprobaciones manuales
 
