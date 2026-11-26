@@ -19,7 +19,10 @@ import { useAutosaveDraft } from "@/hooks/use-autosave-draft";
 import { generateFieldId, useFormEditorState } from "@/hooks/use-form-editor-state";
 import { FIELD_PALETTE } from "@/lib/form-editor/field-palette";
 import type { DraftForm } from "@/lib/form-editor/form-editor.schema";
+import { PublishPanel } from "@/components/form-publishing/publish-panel";
+import { canPublishDraft } from "@/lib/form-publishing/can-publish";
 import type { FieldType } from "@/lib/form-schema";
+import type { PublishingState } from "@/server/form-publishing/form-publishing.service";
 import { AutosaveIndicator } from "./autosave-indicator";
 import { FieldPalette, PALETTE_DRAG_PREFIX } from "./field-palette";
 import { FieldPropertiesPanel } from "./field-properties-panel";
@@ -35,10 +38,12 @@ export function FormEditor({
   formId,
   formName,
   initialDraft,
+  publishingState,
 }: {
   formId: string;
   formName: string;
   initialDraft: DraftForm;
+  publishingState: PublishingState;
 }) {
   const { state, dispatch, fieldsReferencingId } = useFormEditorState(initialDraft);
   const [showPreview, setShowPreview] = useState(true);
@@ -48,7 +53,8 @@ export function FormEditor({
     () => ({ title: state.title, description: initialDraft.description, fields: state.fields }),
     [state.title, state.fields, initialDraft.description],
   );
-  const status = useAutosaveDraft(formId, draft);
+  const { status, isPending } = useAutosaveDraft(formId, draft);
+  const canPublish = canPublishDraft(status.phase, isPending);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -118,6 +124,13 @@ export function FormEditor({
           </Button>
         </div>
       </div>
+
+      <PublishPanel
+        formId={formId}
+        initialState={publishingState}
+        canPublish={canPublish}
+        saveFailed={status.phase === "error"}
+      />
 
       {notice && (
         <p role="status" data-testid="editor-notice" className="rounded-lg border border-amber-400 bg-amber-50 p-2 text-sm text-amber-900">
