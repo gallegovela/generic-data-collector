@@ -52,15 +52,17 @@ Este módulo **no expone GET** de archivos: la lectura sigue siendo `/api/files`
 export const fillSubmissionBodySchema = z.object({
   clientId: z.string().uuid(),
   versionId: z.string().min(1),          // versión que vio quien rellena
-  capturedAt: z.string().datetime(),
+  capturedAt: z.string().datetime(),     // + refine: no posterior a now + 24 h (si no, 400)
   answers: z.record(z.string(), z.unknown()),
   website: z.string().optional(),        // honeypot: debe venir vacío
 });
 export type FillSubmissionBody = z.infer<typeof fillSubmissionBodySchema>;
 
+// Valores por defecto; se pueden sobrescribir con FILL_RATE_LIMIT_UPLOAD y FILL_RATE_LIMIT_SUBMIT
+// (enteros > 0; si no son válidos se usa el valor por defecto). Los tests leen estos valores, no números fijos.
 export const FILL_RATE_LIMITS = {
-  upload: { limit: 30, windowMs: 10 * 60_000 },
-  submit: { limit: 10, windowMs: 10 * 60_000 },
+  upload: { limit: 200, windowMs: 10 * 60_000 },
+  submit: { limit: 60, windowMs: 10 * 60_000 },
 } as const;
 
 // src/lib/field-collector/answers.ts
@@ -91,8 +93,12 @@ export async function submitFill(
 export class FormClosedError extends Error {}  // → 410
 
 // src/server/field-collector/fill-rate-limit.ts
-export function clientIp(headers: Headers): string;   // primer valor de x-forwarded-for, si no "unknown"
+export function clientIp(headers: Headers, hops?: number): string;
+// x-forwarded-for se separa por comas y se recorta; se toma el valor contando `hops` desde el FINAL
+// (hops = 1 → el último, el que añadió el proxy de confianza). `hops` por defecto: env TRUSTED_PROXY_HOPS (entero ≥ 1, por defecto 1).
+// Si hay menos valores que hops, se usa el primero; sin cabecera o vacía → "unknown". Nunca el primer valor por defecto: lo escribe el cliente.
 export function assertWithinFillLimit(kind: "upload" | "submit", slug: string, ip: string): void; // lanza RateLimitError (429)
+export function clearFillLimitsForTests(): void;
 ```
 
 Reglas de `uploadFillFile`:
@@ -106,12 +112,12 @@ Reglas de `submitFill`:
 1. Igual 1 que arriba. Si `body.website` no está vacío → devuelve `{ id: "", created: false }` sin guardar (el handler responde 201 `{ id: "", created: true }`, para no avisar al bot).
 2. `getFormVersion(body.versionId)`; debe existir y cumplir `formId === form.formId` y `organizationId === form.organizationId`; si no, `ValidationError` (400). Se acepta una versión anterior a la publicada actual.
 3. `createSubmission({ organizationId: form.organizationId, actor, form: { id, title: form.name, versionId, versionNumber, schema }, clientId, answers, capturedAt })`, con `actor` = `{ kind: "user", userId, userName: user.name, userOrganizationId }` si hay sesión; `{ kind: "anonymous" }` si no.
-4. `attachFilesToSubmission(organizationId, collectFileKeys(schema, submission.answers), submission.id)` (también cuando `created = false`; es idempotente).
-5. Registrar solo `{ event: "fill.submitted", formId, created }`; nunca `answers`.
+4. `attachFilesToSubmission(organizationId, collectFileKeys(schema, submission.answers), submission.id)` (también cuando `created = false`; es idempotente). **Solo se enlazan `StoredFile` sin `submissionId`** (o ya enlazados a esta misma `Submission`); uno enlazado a otra `Submission` nunca se reasigna. El desarrollador debe comprobarlo en `linkToSubmission`/`attachFilesToSubmission` de `file-storage` (pieza ya fusionada): si hoy reasigna, se ajusta ahí con el cambio mínimo (`updateMany` con `where: { submissionId: null }`) y su test. Si el ajuste exige cambiar un contrato de `file-storage` más allá de eso, se detiene y pregunta en el issue.
+5. Registrar solo `{ event: "fill.submitted", formId, created }`; nunca `answers` ni la IP.
 
 Los handlers: `clientIp` → `assertWithinFillLimit` **solo si no hay sesión** (modo `public` anónimo) → `*Service`. Orden en el handler de subida: comprobar `content-length` como `/api/files` (413) antes de leer el multipart. `SubmissionValidationError` → 400 con `fieldErrors: FieldValidationError[]`.
 
-Limitación de tasa: se reutiliza `isBlocked`/`recordFailure` de `src/server/auth/rate-limit.ts` contando **cada petición** (aunque no sea un fallo), con clave `fill:<kind>:<slug>:<sha256(ip)>` y los mismos `limit`/`windowMs` en ambas llamadas. Es en memoria por proceso (suficiente para el piloto de una instancia, como el login).
+Limitación de tasa: **contador propio, separado del login**. `fill-rate-limit.ts` tiene su propio `Map<string, number[]>` (marcas de tiempo por clave) con su propio tope `MAX_FILL_KEYS = 10_000` (al superarlo se expulsan las claves más antiguas, sin tocar `server/auth/rate-limit.ts`, cuyo comportamiento y `Map` no cambian: así una inundación de IPs falsas nunca desplaza los fallos de login, RNF-AUT-04). Cada llamada a `assertWithinFillLimit` poda las marcas fuera de `windowMs`; si ya hay `limit` marcas lanza `RateLimitError` (con los segundos hasta que caduque la más antigua para `Retry-After`) y, si no, registra la actual. Clave `fill:<kind>:<slug>:<sha256(ip)>`. Es en memoria por proceso: suficiente para el piloto de una instancia; **con varias instancias hará falta un almacén compartido** (Redis o similar), anotado como limitación aceptada. Para anónimos, `limit`/`windowMs` salen de `FILL_RATE_LIMITS`.
 
 ### Interfaz
 
@@ -168,10 +174,11 @@ El cliente, ante un fallo de red o 5xx, conserva el estado y muestra «No se pud
 
 - `organizationId` y el actor salen del formulario y de la sesión; el cuerpo no puede traerlos. Un usuario de otra organización en un formulario `registered` recibe 403 también en subida y guardado.
 - El punto de subida pública solo tiene `POST`: no hay lectura ni listado. Devuelve solo `key`, `kind`, `contentType`, `sizeBytes`. `createSubmission` rechaza claves que no sean de la organización del formulario (`isOwnFileKey`).
+- Un archivo ya enlazado a una `Submission` no se reasigna a otra (ver regla 4 de `submitFill`): un anónimo no puede «robar» la clave de un archivo ajeno de su organización.
 - Los archivos subidos sin guardar quedan huérfanos (RF-STO-07, #24); se documenta, no se resuelve aquí.
 - Honeypot `website` (campo oculto con `tabIndex=-1`, `autoComplete="off"`, fuera de pantalla). Límite de tasa en memoria; con varias instancias sería por proceso (limitación aceptada en el piloto).
 - Logs sin respuestas ni IP en claro (RNF-COL-05).
-- Dependencia de `trust proxy`: `x-forwarded-for` lo fija el proxy de despliegue; en local es `unknown` (un único cubo).
+- Dependencia del proxy de confianza: el primer valor de `x-forwarded-for` lo escribe el cliente, así que **no se usa**. Se toma el valor contando `TRUSTED_PROXY_HOPS` (por defecto 1) desde el final, que es el que añade el proxy de despliegue. Sin cabecera → `unknown` (un único cubo, caso de local). Variables nuevas en `.env.example`: `TRUSTED_PROXY_HOPS=1`, `FILL_RATE_LIMIT_UPLOAD=200`, `FILL_RATE_LIMIT_SUBMIT=60`.
 
 ## Tests
 
@@ -179,13 +186,13 @@ El cliente, ante un fallo de red o 5xx, conserva el estado y muestra «No se pud
 | --- | --- | --- |
 | CA-COL-02 | Vitest (PostgreSQL) | `src/server/field-collector/fill.service.test.ts` (dos `submitFill` con el mismo `clientId` → una `Submission`) |
 | CA-COL-03 | Vitest + Playwright | `src/lib/field-collector/answers.test.ts`; `e2e/field-collector-fill.spec.ts` |
-| CA-COL-04 | Playwright | `e2e/field-collector-fill.spec.ts` (foto, firma, ficha con URL firmada) y `fill.service.test.ts` (enlaza archivos, versión) |
+| CA-COL-04 | Playwright + Vitest | `e2e/field-collector-fill.spec.ts` (foto, firma, ficha con URL firmada) y `fill.service.test.ts` (enlaza archivos, versión) |
 | CA-COL-05 | Playwright | `e2e/field-collector-fill.spec.ts` |
 | CA-COL-06 | Vitest + Playwright | `fill.service.test.ts`, `e2e/field-collector-access.spec.ts` |
-| CA-COL-07 | Vitest + Playwright | `fill.service.test.ts`, `e2e/field-collector-access.spec.ts` |
+| CA-COL-07 | Vitest + Playwright | `fill.service.test.ts` (incluye: una clave ya enlazada a otra `Submission` no se reasigna), `e2e/field-collector-access.spec.ts` |
 | CA-COL-08 | Vitest + Playwright | `fill.service.test.ts`, `e2e/field-collector-access.spec.ts` |
 | CA-COL-09 | Playwright | `e2e/field-collector-fill.spec.ts` |
-| CA-COL-10 | Vitest + Playwright | `src/server/field-collector/fill-rate-limit.test.ts`, `fill.service.test.ts`, `e2e/field-collector-access.spec.ts` |
+| CA-COL-10 | Vitest + Playwright | `src/server/field-collector/fill-rate-limit.test.ts` (límite leído de `FILL_RATE_LIMITS`; `clientIp` con `x-forwarded-for: a, b` usa `b`; el contador de fill no desplaza las claves de login), `fill.service.test.ts` (honeypot: sin `Submission` ni archivos enlazados; logs: espía de `console.*` y logger sin valores de `answers` ni IP, RNF-COL-05), `fill.schema.test.ts` (`capturedAt` > now + 24 h → error), `e2e/field-collector-access.spec.ts` |
 
 Los títulos de test incluyen el identificador del criterio (`CA-COL-0N`) para poder seleccionarlos con `-t`/`-g`. Además, tests unitarios de `geolocation.ts`, `fill.schema.ts` y de los handlers (códigos HTTP de la tabla de errores). Los e2e usan imágenes PNG/JPEG pequeñas de `e2e/fixtures/` y `page.mouse` para la firma.
 
@@ -198,3 +205,4 @@ Los títulos de test incluyen el identificador del criterio (`CA-COL-0N`) para p
 ## Historial de cambios
 
 - 2026-11-26 — Diseño inicial de la pantalla de relleno en línea (#33)
+- 2026-11-26 — Revisión del arquitecto (#33): `clientIp` por saltos desde el final, límites 60/200 configurables, contador propio de fill, enlace de archivos solo si no están enlazados, `capturedAt` ≤ now + 24 h, test de logs con espías

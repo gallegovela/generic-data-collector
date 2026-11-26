@@ -96,7 +96,7 @@ npm run test:stack:run -- npm run db:seed        # organización demo, admin y f
   npm run test:stack:run -- npx vitest run src/server/field-collector/fill.service.test.ts -t "CA-COL-07"
   npm run test:stack:run -- npx playwright test e2e/field-collector-access.spec.ts -g "CA-COL-07"
   ```
-- **Resultado esperado:** los tests pasan. Sin sesión se rellena y guarda, se muestra `/f/<slug>/thanks`; la `Submission` tiene `organizationId` de A, `submittedByUserId` y `submittedByName` nulos; un `organizationId` o una clave de archivo de B incluidos en el cuerpo se ignoran/rechazan (400) y nada se escribe en B; el mismo `uploadId` usado en otra organización no sobrescribe el archivo.
+- **Resultado esperado:** los tests pasan. Sin sesión se rellena y guarda, se muestra `/f/<slug>/thanks`; la `Submission` tiene `organizationId` de A, `submittedByUserId` y `submittedByName` nulos; un `organizationId` o una clave de archivo de B incluidos en el cuerpo se ignoran/rechazan (400) y nada se escribe en B; el mismo `uploadId` usado en otra organización no sobrescribe el archivo; una clave ya enlazada a otra `Submission` de A no se reasigna.
 
 ### PP-COL-07 — Formulario despublicado
 
@@ -128,10 +128,12 @@ npm run test:stack:run -- npm run db:seed        # organización demo, admin y f
 - **Precondiciones:** formulario `public` publicado.
 - **Pasos:**
   ```bash
-  npm run test:stack:run -- npx vitest run src/server/field-collector/fill-rate-limit.test.ts src/server/field-collector/fill.service.test.ts -t "CA-COL-10"
+  npm run test:stack:run -- npx vitest run src/server/field-collector/fill-rate-limit.test.ts -t "CA-COL-10"
+  npm run test:stack:run -- npx vitest run src/server/field-collector/fill.service.test.ts -t "CA-COL-10"
+  npm run test:stack:run -- npx vitest run src/lib/field-collector/fill.schema.test.ts -t "CA-COL-10"
   npm run test:stack:run -- npx playwright test e2e/field-collector-access.spec.ts -g "CA-COL-10"
   ```
-- **Resultado esperado:** los tests pasan. Tras superar `FILL_RATE_LIMITS.submit.limit` guardados desde la misma IP el siguiente responde 429 con cabecera `Retry-After`; lo mismo con la subida; otro formulario u otra IP no quedan bloqueados; con `website` relleno el endpoint responde 201 y no hay `Submission` nueva; `GET /api/public/forms/<slug>/files` responde 405; un `kind: "document"` en la subida responde 400, un fichero no imagen 415 y uno de más de 10 MB 413; la salida de la consola del servidor no contiene las respuestas ni la IP.
+- **Resultado esperado:** los tests pasan (cada comando con al menos un test seleccionado). Tras superar `FILL_RATE_LIMITS.submit.limit` (leído de la constante, no un número fijo) guardados desde la misma IP el siguiente responde 429 con cabecera `Retry-After`; lo mismo con la subida; otro formulario u otra IP no quedan bloqueados; con `x-forwarded-for: a, b` y 1 salto se usa `b` (cambiar el primer valor no evita el límite); las claves `fill:*` no desplazan las de login; con `website` relleno el endpoint responde 201 y no hay `Submission` nueva ni archivos enlazados; `GET /api/public/forms/<slug>/files` responde 405; un `kind: "document"` en la subida responde 400, un fichero no imagen 415 y uno de más de 10 MB 413; un `capturedAt` posterior a now + 24 h responde 400; un test que espía `console.*` y el logger durante `submitFill` y los handlers comprueba que no aparecen valores de `answers` ni la IP (RNF-COL-05).
 
 ### PP-COL-10 — Renderizado de todos los tipos de campo y reintento sin duplicar
 
@@ -160,3 +162,4 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 ## Historial de cambios
 
 - 2026-11-26 — Plan de pruebas inicial: relleno en línea (#33)
+- 2026-11-26 — Revisión del arquitecto (#33): PP-COL-09 con un `-t` por fichero y casos de IP, contador separado, `capturedAt` y logs; PP-COL-06 con no reasignar archivos

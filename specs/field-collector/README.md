@@ -36,7 +36,7 @@ Que un trabajador rellene formularios desde el móvil, también sin conexión, c
 | RF-COL-10 | Must | El campo firma permite firmar con el dedo, borrar y repetir. |
 | RF-COL-11 | Must | El campo GPS captura latitud, longitud, precisión y hora; si el usuario deniega el permiso se informa y, si el campo es obligatorio, no se puede enviar. |
 | RF-COL-12 | Must | El usuario ve el estado de cada respuesta: pendiente, enviando, enviada o error, y puede reintentar. |
-| RF-COL-13 | Must | La respuesta guarda metadatos: dispositivo, fecha de captura y versión del formulario. |
+| RF-COL-13 | Must | La respuesta guarda metadatos: dispositivo, fecha de captura y versión del formulario. (El «dispositivo» queda pendiente de la pieza offline; #33 guarda versión y fecha de captura.) |
 | RF-COL-14 | Should | Un usuario `collector` ve la lista de formularios de su organización y puede descargarlos para usarlos sin conexión. |
 | RF-COL-15 | Must | La pantalla `/f/<slug>` ocupa toda la pantalla y muestra el formulario publicado con dos botones: **Descartar** (pide confirmación si hay algo escrito, no guarda nada y sale) y **Guardar** (valida, envía y muestra confirmación). Descartar vuelve al listado de formularios si hay sesión, o a una pantalla «Rellenado cancelado» si es anónimo. |
 | RF-COL-16 | Must | Tras guardar se muestra una confirmación: con sesión se vuelve al listado de formularios; en anónimo se muestra «Gracias» con la opción de rellenar otra vez. Si el envío falla por red, el usuario puede reintentar con el mismo `clientId` sin duplicar la respuesta. |
@@ -96,7 +96,7 @@ sequenceDiagram
 
 - Si el formulario se republica mientras hay respuestas en cola, se envían con la versión con la que se rellenaron.
 - La pieza #33 cubre solo el relleno **en línea** (RF-COL-01 a 03, 08 a 11, 13 y 15 a 20). PWA, Dexie, borradores locales, cola y estado de envío (RF-COL-04 a 07, 12, 14) quedan para otra pieza; el envío queda detrás de `submit(clientId, answers, files)` para poder poner la cola delante.
-- RF-COL-13: en #33 los metadatos guardados son la versión y la fecha de captura; el dispositivo no se guarda porque `createSubmission` no lo admite (pendiente de decidir, ver design.md).
+- RF-COL-13: en #33 los metadatos guardados son la versión y la fecha de captura; el dispositivo no se guarda porque `createSubmission` no lo admite; queda pendiente de la pieza offline (decidido en la revisión de #33). El servidor rechaza con 400 un `capturedAt` posterior a ahora + 24 h.
 - RF-COL-01: el tema de la organización se aplica con el `theme` que devuelve `getPublishedFormBySlug` (hoy `DEFAULT_THEME`; lo sustituirá `theming`).
 - `/collect` (placeholder antiguo, al que redirige `requireAdminPage` a los `collector`) pasa a ser el listado de formularios publicados de la organización con enlace a `/f/<slug>`.
 
@@ -104,3 +104,4 @@ sequenceDiagram
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — RF-COL-15 a RF-COL-20, RNF-COL-05, CA-COL-04 a CA-COL-10 y supuestos de la pantalla de relleno en línea (#33).
+- 2026-11-26 — Revisión del arquitecto (#33): RF-COL-13 marca «dispositivo» como pendiente de la pieza offline; límite de `capturedAt` en supuestos.
