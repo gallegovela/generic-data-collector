@@ -44,6 +44,8 @@ describe("loadEnv", () => {
       S3_SECRET_KEY: "minioadmin",
       S3_BUCKET: "formia",
       S3_FORCE_PATH_STYLE: true,
+      STORAGE_MAX_UPLOAD_BYTES: 10485760,
+      STORAGE_SIGNED_URL_TTL_SECONDS: 900,
       AUTH_SECRET: "a".repeat(32),
       AUTH_URL: "http://localhost:3000",
       SMTP_HOST: "localhost",
@@ -96,5 +98,36 @@ describe("loadEnv", () => {
     expect(env.SMTP_HOST).toBe("localhost");
     expect(env.SMTP_PORT).toBe(1025);
     expect(env.SMTP_FROM).toBe("no-reply@formia.local");
+  });
+
+  // Cubre: RNF-STO-03, RF-STO-04
+  it("STORAGE_MAX_UPLOAD_BYTES vale 10485760 por defecto y acepta otro valor", () => {
+    expect(loadEnv(validEnv).STORAGE_MAX_UPLOAD_BYTES).toBe(10485760);
+    expect(
+      loadEnv({ ...validEnv, STORAGE_MAX_UPLOAD_BYTES: "2048" }).STORAGE_MAX_UPLOAD_BYTES,
+    ).toBe(2048);
+  });
+
+  // Cubre: RF-STO-02
+  it("STORAGE_SIGNED_URL_TTL_SECONDS rechaza 901 y acepta 900", () => {
+    expect(() => loadEnv({ ...validEnv, STORAGE_SIGNED_URL_TTL_SECONDS: "901" })).toThrowError(
+      /STORAGE_SIGNED_URL_TTL_SECONDS/,
+    );
+    expect(
+      loadEnv({ ...validEnv, STORAGE_SIGNED_URL_TTL_SECONDS: "900" })
+        .STORAGE_SIGNED_URL_TTL_SECONDS,
+    ).toBe(900);
+  });
+
+  // Cubre: RNF-STO-03
+  it("S3_PUBLIC_ENDPOINT es opcional y debe ser una URL", () => {
+    expect(loadEnv(validEnv).S3_PUBLIC_ENDPOINT).toBeUndefined();
+    expect(
+      loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "https://files.example.com" })
+        .S3_PUBLIC_ENDPOINT,
+    ).toBe("https://files.example.com");
+    expect(() => loadEnv({ ...validEnv, S3_PUBLIC_ENDPOINT: "no-es-url" })).toThrowError(
+      /S3_PUBLIC_ENDPOINT/,
+    );
   });
 });

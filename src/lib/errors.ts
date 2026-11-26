@@ -42,6 +42,20 @@ export class ValidationError extends Error {
   }
 }
 
+export class PayloadTooLargeError extends Error {
+  constructor(message = "El archivo es demasiado grande.") {
+    super(message);
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+export class UnsupportedMediaTypeError extends Error {
+  constructor(message = "Tipo de archivo no admitido.") {
+    super(message);
+    this.name = "UnsupportedMediaTypeError";
+  }
+}
+
 export class RateLimitError extends Error {
   constructor(message = "Demasiados intentos. Inténtalo de nuevo en unos minutos.") {
     super(message);
