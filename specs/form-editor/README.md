@@ -3,7 +3,7 @@
 - **Prefijo:** `EDT`
 - **Estado:** diseñado
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #1 (análisis), #6 (diseño)
+- **Issues:** #1 (análisis), #6 (diseño), #34 (acción «Rellenar» y contador real)
 
 ## Objetivo
 
@@ -47,6 +47,8 @@ Que un administrador sin conocimientos técnicos cree y ajuste formularios con a
 | RF-EDT-10 | Must | El editor impide guardar un esquema inválido y señala el campo con el problema. |
 | RF-EDT-11 | Should | Deshacer y rehacer dentro de la sesión (Ctrl+Z / Ctrl+Y). |
 | RF-EDT-12 | Must | Desde el editor se puede pedir a la IA que modifique el formulario actual; el cambio propuesto se muestra antes de aplicarse. |
+| RF-EDT-13 | Must | En el menú de acciones de cada fila del listado hay una acción «Rellenar» que lleva a `/f/<slug>` (la pantalla de relleno es de `field-collector`). Solo está activa si el formulario está publicado y tiene `slug`; en borrador o despublicado aparece desactivada con la explicación «Publica el formulario para poder rellenarlo». No se construyen enlaces de relleno por `formId`. |
+| RF-EDT-14 | Must | La columna de respuestas del listado muestra el número real de respuestas (`Submission`) de cada formulario de la organización, calculado con una sola consulta agrupada por formulario (sin una consulta por fila), sin cargar datos de las respuestas y siempre filtrado por `organizationId`. Si el formulario tiene respuestas, el número enlaza a `/admin/forms/<id>/submissions`. |
 
 ## Requisitos no funcionales
 
@@ -85,7 +87,7 @@ sequenceDiagram
 
 ## Datos
 
-- **Posee:** `Form` (borrador del esquema como JSON, nombre, estado `draft`/`published`, fecha de archivado). Todavía no crea `FormVersion` ni `Submission`: son de `form-publishing` y `submissions-dashboard` respectivamente (ver "Supuestos y preguntas abiertas"); mientras no existan, el listado muestra placeholders fijos para "versión publicada" (siempre "Sin publicar") y "número de respuestas" (siempre 0).
+- **Posee:** `Form` (borrador del esquema como JSON, nombre, estado `draft`/`published`, fecha de archivado). Todavía no crea `FormVersion` ni `Submission`: son de `form-publishing` y `submissions-dashboard` respectivamente (ver "Supuestos y preguntas abiertas"). Desde #26 y #34 el listado muestra la versión publicada real (`form-publishing`) y el número real de respuestas: lo **lee** de `Submission` (solo recuento agrupado por `formId` y `organizationId`; no escribe ni carga respuestas).
 - **Lee:** `Organization`/`User` de `tenancy-auth` (vía `requireAdminPage`/`getCurrentOrg`, solo para la sesión y el filtro multi-tenant, sin tocar sus tablas). Usa los tipos y esquemas de `form-schema` (`Field`, `FieldSchema`, `FIELD_TYPES`) para construir y validar los campos del borrador.
 
 ## Dependencias
@@ -107,6 +109,9 @@ sequenceDiagram
 - **CA-EDT-10** — Dado un campo seleccionado, cuando se edita su etiqueta, descripción, obligatoriedad o alguna opción específica de su tipo (por ejemplo las opciones de un `single_choice`) y pasan 2 s, entonces el cambio se guarda y se mantiene al recargar la página.
 - **CA-EDT-11** — Dado un campo sin ninguna condición que lo referencie, cuando se elimina, entonces desaparece del lienzo sin ningún aviso; dado un campo cualquiera, cuando se duplica, entonces aparece una copia con un id distinto y el mismo contenido, y editar la copia no cambia el original.
 - **CA-EDT-12** — Dado un formulario con al menos dos campos, cuando en el panel de propiedades del segundo se elige el primero como campo origen de una condición de visibilidad junto con un operador y un valor válidos, y pasan 2 s, entonces la condición se guarda y se mantiene al recargar la página.
+- **CA-EDT-13** — Dado un formulario publicado con `slug`, cuando el administrador abre el menú de acciones de su fila, entonces «Rellenar» está activa y lleva a `/f/<slug>`.
+- **CA-EDT-14** — Dado un formulario en borrador (o despublicado), cuando el administrador abre el menú de acciones de su fila, entonces «Rellenar» no está disponible (desactivada, sin enlace) y se explica «Publica el formulario para poder rellenarlo».
+- **CA-EDT-15** — Dado un formulario con 3 respuestas, y otra organización que también tiene respuestas, cuando se abre el listado de la primera, entonces la fila muestra 3 y el recuento no incluye respuestas de la otra organización; un formulario sin respuestas muestra 0.
 
 ## Supuestos y preguntas abiertas
 
@@ -119,4 +124,5 @@ sequenceDiagram
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-17 — Diseño técnico (#6): añadidas las secciones "Actores", "Flujos principales", "Datos" y "Supuestos y preguntas abiertas"; añadidos CA-EDT-04 a CA-EDT-08 (crear, duplicar, archivar, bloqueo de guardado con campo inválido, reordenar con teclado), necesarios para cubrir de forma verificable RF-EDT-01, RF-EDT-02, RF-EDT-04 y RF-EDT-10; documentado que `Form.draftSchema` usa un `DraftFormSchema` propio (sin mínimo de campos) en vez de reutilizar `FormVersionSchema` entero, y que las columnas de "versión publicada" y "número de respuestas" son placeholders fijos hasta que existan `form-publishing`/`submissions-dashboard`.
+- 2026-11-26 — #34: añadidos RF-EDT-13 (acción «Rellenar» en el listado) y RF-EDT-14 (contador de respuestas real, una consulta agrupada) con CA-EDT-13 a CA-EDT-15. Sustituyen el placeholder «siempre 0» de RF-EDT-01 y CA-EDT-04 (que sigue valiendo: un formulario nuevo tiene 0 respuestas); `Submission` ya existe (#7), así que la columna deja de ser un placeholder. Nota: la «versión publicada» real ya la aporta `form-publishing` (#26).
 - 2026-11-17 — Revisión del arquitecto (#6): añadidos CA-EDT-09 a CA-EDT-12 (añadir campo desde la paleta, editar propiedades, eliminar/duplicar sin referencias, condición de visibilidad válida) para cubrir de forma verificable RF-EDT-03, RF-EDT-05, RF-EDT-06 y RF-EDT-07, que no tenían ningún criterio trazable.
