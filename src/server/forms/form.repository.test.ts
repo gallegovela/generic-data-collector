@@ -48,6 +48,29 @@ describe("form.repository", () => {
     expect((await listFormsByOrganization(orgB.id)).map((f) => f.id)).toEqual([formOfB.id]);
   });
 
+  // Cubre: RF-PUB-01
+  it("RF-PUB-01: etiquetas Sin publicar, v<n> y Despublicado (última v<n>)", async () => {
+    const org = await createOrganization({ name: "Organización etiquetas (form.repository test)" });
+    try {
+      const draft = { title: "x", fields: [] };
+      const sin = await createForm(org.id, { name: "Sin", draft });
+      const pub = await createForm(org.id, { name: "Pub", draft });
+      const des = await createForm(org.id, { name: "Des", draft });
+      await prisma.form.update({ where: { id: pub.id }, data: { status: "published", publishedVersion: 2 } });
+      await prisma.form.update({ where: { id: des.id }, data: { status: "draft", publishedVersion: 3 } });
+
+      const labels = Object.fromEntries(
+        (await listFormsByOrganization(org.id)).map((f) => [f.id, f.publishedVersionLabel]),
+      );
+      expect(labels[sin.id]).toBe("Sin publicar");
+      expect(labels[pub.id]).toBe("v2");
+      expect(labels[des.id]).toBe("Despublicado (última v3)");
+    } finally {
+      await prisma.form.deleteMany({ where: { organizationId: org.id } });
+      await prisma.organization.delete({ where: { id: org.id } });
+    }
+  });
+
   // Cubre: CA-EDT-06
   it("un formulario archivado desaparece del listado", async () => {
     const f = await createForm(orgA.id, { name: "A1", draft: { title: "A1", fields: [] } });

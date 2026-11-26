@@ -2,7 +2,7 @@
 
 - **Requisitos:** [README.md](README.md)
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #7 (diseño), padre #1
+- **Issues:** #7 (diseño), padre #1; #27 (recepción de respuestas, padre #23; ver la sección "Recepción de respuestas (#27)")
 
 ## Resumen
 
@@ -344,6 +344,153 @@ sequenceDiagram
 
 No se automatiza en #7: generar 10 000 filas realistas y medir el tiempo de carga en el runner de `testPR` es un test de carga, no un test funcional, y el runner no tiene datos de ese volumen (`demo-seed`, sin issue todavía, es quien preparará datos de la demo a mayor escala). Queda en "Comprobaciones manuales" de `test-plan.md` como riesgo anotado, no como caso automático; se recomienda un test de carga específico cuando exista `demo-seed` con datos a esa escala.
 
+## Recepción de respuestas (#27)
+
+Añade la escritura real. Cubre RF-SUB-01 a RF-SUB-04, RF-SUB-11 y RF-SUB-12. **No hay route handler ni server action en #27**: el servicio lo llaman la pantalla de relleno (#23), el modo sin conexión y la API, que son quienes deciden la organización y construyen el actor. Las salidas (RF-SUB-09) no se disparan aquí.
+
+### Modelo de datos (migración `add_submission_version_and_author`)
+
+```prisma
+model Submission {
+  // ...campos existentes sin cambios...
+  formVersionId      String?  // id de la versión publicada (identificador lógico, SIN clave foránea, como formId)
+  formVersionNumber  Int?     // número de versión (1, 2, ...) para mostrarlo y filtrar
+  submittedByUserId  String?  // User.id del usuario autenticado; null si es anónimo; SIN clave foránea
+
+  @@index([organizationId, formId, formVersionNumber])
+}
+```
+
+Las tres columnas son nulables: las filas anteriores a #27 (datos de #7) quedan en `NULL` y la interfaz muestra "—". La migración es solo `ALTER TABLE ... ADD COLUMN` más `CREATE INDEX`, sin `NOT NULL` ni backfill (el snapshot no contiene el número de versión). `@@unique([organizationId, clientId])` ya existe y es la base de la idempotencia.
+
+### Ficheros nuevos o modificados
+
+| Capa | Ruta | Cambio |
+| --- | --- | --- |
+| Modelo | `prisma/schema.prisma`, `prisma/migrations/<timestamp>_add_submission_version_and_author/` | Campos e índice de arriba. |
+| Errores | `src/lib/submissions-dashboard/submission-errors.ts` (nuevo) | `SubmissionValidationError`. |
+| Esquema | `src/lib/submissions-dashboard/submission-filters.schema.ts` (modificar) | Añade `version`. |
+| Esquema | `src/lib/submissions-dashboard/create-submission.schema.ts` (nuevo) | `createSubmissionInputSchema`, constantes de límite y validación de claves de archivo. |
+| Repositorio | `src/server/submissions/submission.repository.ts` (modificar) | `findSubmissionByClientId`, `insertSubmission`, `listFormVersionNumbers`; el listado devuelve y filtra por versión. |
+| Servicio | `src/server/submissions/submission.service.ts` (modificar) | `createSubmission`; `listSubmissions` devuelve `versions`. |
+| Interfaz | `src/components/submissions-dashboard/submissions-table.tsx`, `submission-filters-bar.tsx` (modificar) | Columna "Versión" y selector de versión. |
+
+### Contratos
+
+```ts
+// src/lib/submissions-dashboard/submission-errors.ts
+import { ValidationError } from "@/lib/errors";
+import type { FieldValidationError } from "@/lib/form-schema";
+
+/** Errores por campo. NUNCA incluye valores de respuesta, solo fieldId y mensaje (RNF-SUB-03).
+ *  fieldId === "_" para errores que no son de un campo (tamaño, fecha, esquema). */
+export class SubmissionValidationError extends ValidationError {
+  constructor(public readonly fieldErrors: FieldValidationError[]);
+}
+```
+
+```ts
+// src/lib/submissions-dashboard/create-submission.schema.ts
+import { z } from "zod";
+export const MAX_SUBMISSION_ANSWERS_BYTES = 256 * 1024; // JSON.stringify(answers) en UTF-8
+
+export const createSubmissionInputSchema = z.object({
+  organizationId: z.string().min(1),                 // lo decide quien llama, nunca el cuerpo de una petición
+  actor: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("user"), userId: z.string().min(1), userName: z.string().min(1), userOrganizationId: z.string().min(1) }),
+    z.object({ kind: z.literal("anonymous") }),
+  ]),
+  form: z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    versionId: z.string().min(1),
+    versionNumber: z.number().int().positive(),
+    schema: z.unknown(),                             // se parsea con FormVersionSchema dentro del servicio
+  }),
+  clientId: z.string().uuid(),
+  answers: z.record(z.string(), z.unknown()),
+  capturedAt: z.coerce.date(),
+});
+export type CreateSubmissionInput = z.input<typeof createSubmissionInputSchema>;
+
+/** Una clave de archivo es válida (RF-STO-01: `org/<organizationId>/<tipo>/<uuid>.<ext>`) si:
+ *  - empieza por el prefijo exacto `org/<organizationId>/` (con la barra final: `org/abc` NO valida `org/abcd/...`);
+ *  - no empieza por `/`, no contiene el segmento `..` y no tiene segmentos vacíos (`//`);
+ *  - tras el prefijo hay al menos un segmento más. */
+export function isOwnFileKey(organizationId: string, key: string): boolean;
+```
+
+```ts
+// src/server/submissions/submission.repository.ts (añadidos)
+export function findSubmissionByClientId(organizationId: string, clientId: string): Promise<Submission | null>;
+
+export function insertSubmission(
+  organizationId: string,
+  data: {
+    formId: string; formTitle: string; clientId: string;
+    formVersionId: string; formVersionNumber: number;
+    formVersionSnapshot: FormVersion; answers: Record<string, unknown>;
+    submittedByUserId: string | null; submittedByName: string | null;
+    capturedAt: Date;
+  },
+): Promise<Submission>; // lanza el error de Prisma P2002 si ya existe (organizationId, clientId)
+
+/** Números de versión distintos con respuestas de ese formId, orden ascendente; ignora los NULL. */
+export function listFormVersionNumbers(organizationId: string, formId: string): Promise<number[]>;
+
+// SubmissionListFilters gana `formVersionNumber?: number` (where.formVersionNumber).
+// SubmissionListItem gana `formVersionNumber: number | null`.
+```
+
+```ts
+// src/server/submissions/submission.service.ts (añadidos)
+export type CreateSubmissionResult = { submission: Submission; created: boolean };
+
+/** Orden de comprobaciones:
+ *  1. createSubmissionInputSchema.parse (fallo -> SubmissionValidationError con fieldId "_").
+ *  2. actor.kind === "user" && actor.userOrganizationId !== organizationId -> ForbiddenError("No puedes guardar respuestas en otra organización.").
+ *  3. Tamaño de answers > MAX_SUBMISSION_ANSWERS_BYTES -> SubmissionValidationError([{ fieldId: "_", message: "La respuesta es demasiado grande." }]).
+ *  4. Idempotencia: findSubmissionByClientId(organizationId, clientId). Si existe:
+ *       - si existing.formId !== form.id -> ConflictError("El identificador de respuesta ya se usó en otro formulario.");
+ *       - si no -> { submission: existing, created: false }. NO revalida.
+ *  5. FormVersionSchema.safeParse(form.schema); si falla -> SubmissionValidationError([{ fieldId: "_", message: "El esquema del formulario no es válido." }]).
+ *  6. validateSubmission(schemaParsed, answers) (de form-schema), contra ESTA versión, no la última.
+ *     Si falla -> SubmissionValidationError(errors). No se guarda nada.
+ *  7. Claves de archivo: se recorren los `FileRef` de la SALIDA de validateSubmission (ya sin campos ocultos por lógica condicional,
+ *     que no se comprueban). Un campo `photo` es un array de FileRef (`FileRef[]`) y uno `signature` es un único FileRef (`{ key, ... }`).
+ *     Cada `key` debe cumplir isOwnFileKey(organizationId, key); si alguna no -> SubmissionValidationError([{ fieldId, message: "Archivo no válido." }]).
+ *  8. insertSubmission(...) con answers = data validada (la salida de validateSubmission) y formVersionSnapshot = esquema parseado.
+ *     submittedByUserId/submittedByName = actor user; null si anónimo. syncedAt lo pone la base de datos (RF-SUB-04).
+ *     Si lanza P2002 (carrera entre dos envíos) -> volver a findSubmissionByClientId y devolver { created: false }.
+ *  Errores: ForbiddenError (403), ConflictError (409), SubmissionValidationError (422).
+ *  Contrato recomendado para los consumidores: creación -> 201; repetición idempotente (created: false) -> 200. */
+export async function createSubmission(input: CreateSubmissionInput): Promise<CreateSubmissionResult>;
+```
+
+`SubmissionFiltersInput` gana `version: z.coerce.number().int().positive().optional()` (querystring `?version=2`) y `listSubmissions` lo traduce a `formVersionNumber`; `SubmissionListResult` gana `versions: number[]` (de `listFormVersionNumbers`) para pintar el selector. Si `version` no existe, el listado sale vacío (no es un error).
+
+### Seguridad y privacidad (#27)
+
+- `organizationId` es un parámetro del servicio, nunca viene del cuerpo; el control de `userOrganizationId` evita que un usuario guarde en otra organización (CA-SUB-13).
+- Ningún log imprime `answers`; los errores solo llevan `fieldId` y mensajes fijos de `form-schema` (que usan la etiqueta del campo, no su valor).
+- La validación contra la versión indicada (paso 6) hace que un cambio posterior del formulario no invalide respuestas antiguas (CA-SUB-12). El servicio no consulta la base de datos de formularios: confía en `form.schema`, que construye quien llama a partir de la `FormVersion` real; esa confianza es de servidor a servidor, nunca viene del navegador.
+- **Restricciones para los consumidores** (#23, modo sin conexión, API): (a) cuando exista `form-publishing`, quien llama comprueba que la versión existe y está publicada y resuelve la organización a partir del formulario; el servicio no consulta la base de datos de formularios, para seguir siendo puro y testeable; (b) quien llama limita además el tamaño del cuerpo HTTP (el límite de 256 KiB del servicio solo cuenta `answers`; fotos y firmas son claves, no bytes).
+
+### Tests (#27)
+
+| Criterio | Tipo | Fichero |
+| --- | --- | --- |
+| CA-SUB-10 | Vitest | `src/server/submissions/submission.service.test.ts` — `describe("CA-SUB-10")`: dos llamadas con el mismo `clientId` -> 1 fila, `created` true y false; mismo `clientId` con otro `form.id` -> `ConflictError`; carrera simulada con `Promise.all` -> 1 fila. |
+| CA-SUB-11 | Vitest | idem — `describe("CA-SUB-11")`: campo obligatorio ausente -> `SubmissionValidationError` con `fieldId` y 0 filas; el mensaje no contiene ningún valor enviado. |
+| CA-SUB-12 | Vitest | idem — `describe("CA-SUB-12")`: respuesta válida para v1 con `form.schema` v1 (la v2 añade un obligatorio) -> aceptada, `formVersionNumber` 1 y snapshot de v1. |
+| CA-SUB-13 | Vitest | idem — `describe("CA-SUB-13")`: actor de la organización A, `organizationId` de B -> `ForbiddenError`, 0 filas. |
+| RF-SUB-01/03 (límites y claves) | Vitest | idem — `describe("limites")`: `answers` > 256 KiB rechazado; array de `photo` con una clave ajena entre otras propias -> rechazado señalando el campo; `signature` ajena rechazada; clave con `..` rechazada; fotos y firma propias aceptadas; clave ajena en un campo oculto por lógica condicional no se comprueba (se descarta). |
+| RF-SUB-01 (autor) | Vitest | idem — `describe("autor")`: actor user guarda `submittedByUserId` y `submittedByName`; anónimo guarda `null` en ambos. |
+| RF-SUB-04 | Vitest | idem — `describe("fechas")`: `capturedAt` se guarda tal cual y `syncedAt` lo pone el servidor. |
+| `isOwnFileKey` | Vitest | `src/lib/submissions-dashboard/create-submission.schema.test.ts` — `describe("isOwnFileKey")`: clave propia válida; prefijo parecido (`org/abc/...` con organización `abc` válido, `org/abcd/...` no); `org/abc` sin barra, `/org/abc/...`, `..` y segmentos vacíos rechazados. |
+| CA-SUB-14 | Vitest | `src/server/submissions/submission.repository.test.ts` — `describe("CA-SUB-14")`: listado con `formVersionNumber` filtra; `listFormVersionNumbers` devuelve `[1, 2]` sin NULL ni de otra organización. |
+| CA-SUB-14 | Playwright | `e2e/submissions-dashboard-listing.spec.ts` (ampliar) — columna "Versión" y filtro `?version=`. |
+
 ## Tareas de desarrollo
 
 | Orden | Issue | Tarea | Depende de |
@@ -364,9 +511,16 @@ No se automatiza en #7: generar 10 000 filas realistas y medir el tiempo de carg
 | 14 | #7 | `src/app/admin/forms/[id]/submissions/page.tsx`, `.../[submissionId]/page.tsx` | 8, 11, 12 |
 | 15 | #7 | `src/app/admin/page.tsx` (modificar) | 8, 13 |
 | 16 | #7 | `e2e/submissions-dashboard-listing.spec.ts`, `-detail.spec.ts`, `-home.spec.ts` | 14, 15 |
+| 17 | #27 | Migración `add_submission_version_and_author` y campos en `prisma/schema.prisma` | — |
+| 18 | #27 | `submission-errors.ts`, `create-submission.schema.ts` (+ test), `version` en `submission-filters.schema.ts` | — |
+| 19 | #27 | Repositorio: `findSubmissionByClientId`, `insertSubmission`, `listFormVersionNumbers`, filtro/columna de versión (+ tests) | 17 |
+| 20 | #27 | Servicio `createSubmission` y `versions` en `listSubmissions` (+ tests) | 18, 19 |
+| 21 | #27 | Tabla y barra de filtros con versión; ampliar el e2e del listado | 20 |
 
 ## Historial de cambios
 
 - 2026-11-18 — Diseño inicial (#7): `Submission` sin clave foránea a `Form`/`FormVersion` (identificador lógico `formId` + copia inmutable del esquema en `formVersionSnapshot`, RF-SUB-11); listado paginado y filtrable, ficha de detalle solo lectura y panel de inicio, todos como Server Components sin ninguna mutación; mapa con `leaflet`/`react-leaflet` (dependencia nueva, pendiente de aprobación); marcador de posición para fotos/firma mientras no exista `file-storage`; RNF-SUB-02 fuera del plan de pruebas automático (riesgo anotado).
 - 2026-11-26 — Issue #28 (ver `specs/outputs/design.md`): `Submission.formVersionNumber Int?` (nullable); `listSubmissionsByForm` pasa a usar `buildSubmissionWhere` y `listSubmissions` a usar `toListFilters`, sin cambiar su comportamiento; nuevas `countSubmissionsOfForm` y `listSubmissionsForExport`; el listado muestra los enlaces de exportación.
+- 2026-11-26 — Diseño de la recepción (#27): servicio `createSubmission` idempotente validado contra la versión indicada, actor `user`/`anonymous`, límite de 256 KiB y validación de claves de archivo propias, campos `formVersionId`, `formVersionNumber` y `submittedByUserId` (nulables, sin clave foránea), versión visible y filtrable en el listado. Sin route handler en #27. Las tareas 17 a 21 son de #27 (las 1 a 16 son de #7 y ya están hechas).
+- 2026-11-26 — Revisión del arquitecto (#27): tabla de tareas ordenada y sin duplicados; contrato de claves de archivo (`photo` es `FileRef[]`, `signature` un `FileRef`, campos ocultos no se comprueban); `isOwnFileKey` estricto (prefijo exacto con barra, sin `..`, sin barra inicial ni segmentos vacíos); códigos HTTP recomendados (422/403/409, 201/200); restricciones para los consumidores.
 - 2026-11-18 — Revisión del arquitecto (#7, cambio bloqueante): la fila de "Tests" sobre el aislamiento por organización se amplía para cubrir también `findFilterableFields`, `getSubmissionStats` y la búsqueda de texto (`findSubmissionIdsByText`), no solo `findSubmissionById`/`listSubmissionsByForm` (ver PP-SUB-01 en `test-plan.md`).

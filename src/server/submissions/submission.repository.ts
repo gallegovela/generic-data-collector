@@ -12,6 +12,7 @@ export type SubmissionListFilters = {
   submittedBy?: string;
   fieldFilter?: { fieldId: string; value: string | boolean };
   textQuery?: string;
+  formVersionNumber?: number;
   page: number;
 };
 
@@ -20,6 +21,7 @@ export type SubmissionListItem = {
   capturedAt: Date;
   syncedAt: Date;
   submittedByName: string | null;
+  formVersionNumber: number | null;
 };
 
 export type SubmissionStats = {
@@ -67,6 +69,9 @@ async function buildSubmissionWhere(
   }
   if (filters.submittedBy) {
     where.submittedByName = { contains: filters.submittedBy, mode: "insensitive" };
+  }
+  if (filters.formVersionNumber !== undefined) {
+    where.formVersionNumber = filters.formVersionNumber;
   }
   if (filters.fieldFilter) {
     where.answers = { path: [filters.fieldFilter.fieldId], equals: filters.fieldFilter.value };
@@ -131,7 +136,13 @@ export async function listSubmissionsByForm(
       orderBy: { capturedAt: "desc" },
       skip: (Math.max(filters.page, 1) - 1) * SUBMISSIONS_PAGE_SIZE,
       take: SUBMISSIONS_PAGE_SIZE,
-      select: { id: true, capturedAt: true, syncedAt: true, submittedByName: true },
+      select: {
+        id: true,
+        capturedAt: true,
+        syncedAt: true,
+        submittedByName: true,
+        formVersionNumber: true,
+      },
     }),
     prisma.submission.count({ where }),
   ]);
@@ -185,7 +196,59 @@ export async function getSubmissionStats(organizationId: string): Promise<Submis
   };
 }
 
-/** Solo para tests y datos de ejemplo; no valida `answers` (RF-SUB-03 es de la recepción real). */
+/** Cubre: RF-SUB-02 (idempotencia por organizationId + clientId). */
+export function findSubmissionByClientId(
+  organizationId: string,
+  clientId: string,
+): Promise<Submission | null> {
+  return prisma.submission.findFirst({ where: { organizationId, clientId } });
+}
+
+/** Lanza el error de Prisma P2002 si ya existe (organizationId, clientId). */
+export function insertSubmission(
+  organizationId: string,
+  data: {
+    formId: string;
+    formTitle: string;
+    clientId: string;
+    formVersionId: string;
+    formVersionNumber: number;
+    formVersionSnapshot: FormVersion;
+    answers: Record<string, unknown>;
+    submittedByUserId: string | null;
+    submittedByName: string | null;
+    capturedAt: Date;
+  },
+): Promise<Submission> {
+  return prisma.submission.create({
+    data: {
+      organizationId,
+      formId: data.formId,
+      formTitle: data.formTitle,
+      clientId: data.clientId,
+      formVersionId: data.formVersionId,
+      formVersionNumber: data.formVersionNumber,
+      formVersionSnapshot: data.formVersionSnapshot as Prisma.InputJsonValue,
+      answers: data.answers as Prisma.InputJsonValue,
+      submittedByUserId: data.submittedByUserId,
+      submittedByName: data.submittedByName,
+      capturedAt: data.capturedAt,
+    },
+  });
+}
+
+/** Números de versión distintos con respuestas de ese formId, ascendente; ignora los NULL. */
+export async function listFormVersionNumbers(organizationId: string, formId: string): Promise<number[]> {
+  const rows = await prisma.submission.findMany({
+    where: { organizationId, formId, formVersionNumber: { not: null } },
+    distinct: ["formVersionNumber"],
+    orderBy: { formVersionNumber: "asc" },
+    select: { formVersionNumber: true },
+  });
+  return rows.flatMap((r) => (r.formVersionNumber === null ? [] : [r.formVersionNumber]));
+}
+
+/** Solo para tests y datos de ejemplo; no valida `answers` (la validación real es de createSubmission). */
 export function createSubmissionFixture(
   organizationId: string,
   data: {
@@ -195,7 +258,9 @@ export function createSubmissionFixture(
     formVersionSnapshot: FormVersion;
     answers: Record<string, unknown>;
     submittedByName?: string;
+    formVersionId?: string;
     formVersionNumber?: number;
+    submittedByUserId?: string;
     capturedAt: Date;
   },
 ): Promise<Submission> {
@@ -208,7 +273,9 @@ export function createSubmissionFixture(
       formVersionSnapshot: data.formVersionSnapshot as Prisma.InputJsonValue,
       answers: data.answers as Prisma.InputJsonValue,
       submittedByName: data.submittedByName ?? null,
+      formVersionId: data.formVersionId ?? null,
       formVersionNumber: data.formVersionNumber ?? null,
+      submittedByUserId: data.submittedByUserId ?? null,
       capturedAt: data.capturedAt,
     },
   });

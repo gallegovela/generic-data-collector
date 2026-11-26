@@ -32,6 +32,7 @@ model Organization {
   invitations Invitation[]
   forms       Form[]
   submissions Submission[]
+  storedFiles StoredFile[]
 
   @@map("organizations")
 }
@@ -93,19 +94,46 @@ enum FormStatus {
 // form-editor (#6): borrador JSON + metadatos. No hay FormVersion ni
 // Submission todavía (form-publishing / submissions-dashboard).
 model Form {
-  id             String     @id @default(cuid())
-  organizationId String
-  name           String
-  status         FormStatus @default(draft)
-  draftSchema    Json
-  archivedAt     DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id               String         @id @default(cuid())
+  organizationId   String
+  name             String
+  status           FormStatus     @default(draft)
+  draftSchema      Json
+  archivedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  // form-publishing (#26)
+  slug             String?        @unique
+  accessMode       FormAccessMode @default(registered)
+  publishedVersion Int? // última versión publicada (se conserva al despublicar)
 
   organization Organization @relation(fields: [organizationId], references: [id])
+  versions     FormVersion[]
 
   @@index([organizationId])
   @@map("forms")
+}
+
+enum FormAccessMode {
+  registered
+  public
+}
+
+// form-publishing (#26): esquema inmutable de cada publicación.
+model FormVersion {
+  id                String   @id @default(cuid())
+  formId            String
+  organizationId    String
+  version           Int
+  schema            Json
+  publishedByUserId String?
+  createdAt         DateTime @default(now())
+
+  form Form @relation(fields: [formId], references: [id])
+
+  @@unique([formId, version])
+  @@index([organizationId, formId])
+  @@map("form_versions")
 }
 
 // submissions-dashboard (#7): sin clave foránea a Form ni FormVersion
@@ -119,7 +147,10 @@ model Submission {
   formVersionSnapshot Json
   answers             Json
   submittedByName     String?
+  // #27: identificadores lógicos, sin clave foránea (como formId).
+  formVersionId       String?
   formVersionNumber   Int?
+  submittedByUserId   String?
   capturedAt          DateTime
   syncedAt            DateTime @default(now())
   createdAt           DateTime @default(now())
@@ -128,5 +159,34 @@ model Submission {
 
   @@unique([organizationId, clientId])
   @@index([organizationId, formId, capturedAt])
+  @@index([organizationId, formId, formVersionNumber])
   @@map("submissions")
+}
+
+enum StoredFileKind {
+  photo
+  signature
+  document
+}
+
+// file-storage (#25): metadatos de los archivos guardados en S3. Sin clave
+// foránea a Submission (submissionId es un identificador lógico; null =
+// huérfano; ver specs/file-storage/design.md).
+model StoredFile {
+  id             String         @id @default(cuid())
+  organizationId String
+  key            String         @unique
+  uploadId       String
+  kind           StoredFileKind
+  contentType    String
+  sizeBytes      Int
+  submissionId   String?
+  createdAt      DateTime       @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, uploadId])
+  @@index([organizationId, submissionId])
+  @@index([submissionId, createdAt])
+  @@map("stored_files")
 }

@@ -26,7 +26,7 @@ export default async function SubmissionsPage({
   const { id } = await params;
   const raw = await searchParams;
 
-  const keys = ["dateFrom", "dateTo", "submittedBy", "fieldId", "fieldValue", "q", "page"] as const;
+  const keys = ["dateFrom", "dateTo", "submittedBy", "fieldId", "fieldValue", "q", "version", "page"] as const;
   const query = Object.fromEntries(keys.map((k) => [k, first(raw[k])]));
   // Filtros inválidos en la URL: se descartan y se muestra el listado sin filtrar.
   const parsed = submissionFiltersSchema.safeParse(query);
@@ -39,8 +39,12 @@ export default async function SubmissionsPage({
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-semibold tracking-tight">Respuestas</h1>
-      <SubmissionFiltersBar formId={id} values={filters} filterableFields={result.filterableFields} />
-      {result.total > 0 ? <ExportButtons formId={id} query={queryWithoutPage} /> : null}
+      <SubmissionFiltersBar
+        formId={id}
+        values={filters}
+        filterableFields={result.filterableFields}
+        versions={result.versions}
+      />
       <SubmissionsTable formId={id} result={result} query={queryWithoutPage} />
     </div>
   );

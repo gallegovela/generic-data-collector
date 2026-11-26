@@ -37,6 +37,9 @@ export async function addSubmission(
     submittedByName: opts.by ?? "Ana Encargada",
     formVersionNumber: opts.formVersionNumber,
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
+    ...(opts.version === undefined
+      ? {}
+      : { formVersionId: `v${opts.version}`, formVersionNumber: opts.version }),
   });
 }
 

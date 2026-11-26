@@ -18,6 +18,12 @@ export type FormSummary = {
   updatedAt: Date;
 };
 
+/** Cubre: RF-PUB-01 */
+function versionLabel(status: FormStatus, publishedVersion: number | null): string {
+  if (publishedVersion === null) return "Sin publicar";
+  return status === "published" ? `v${publishedVersion}` : `Despublicado (última v${publishedVersion})`;
+}
+
 export async function listFormsByOrganization(organizationId: string): Promise<FormSummary[]> {
   const forms = await prisma.form.findMany({
     where: { organizationId, archivedAt: null },
@@ -27,8 +33,7 @@ export async function listFormsByOrganization(organizationId: string): Promise<F
     id: form.id,
     name: form.name,
     status: form.status,
-    // TODO(form-publishing, RF-PUB-01): sustituir cuando exista FormVersion
-    publishedVersionLabel: "Sin publicar",
+    publishedVersionLabel: versionLabel(form.status, form.publishedVersion),
     // TODO(submissions-dashboard, RF-SUB-05): sustituir cuando exista Submission
     responseCount: 0,
     updatedAt: form.updatedAt,
