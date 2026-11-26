@@ -5,7 +5,7 @@
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
 - **Issues:** #28 (exportación a CSV y Excel), #35 (destinos: email con PDF y webhook firmado)
 
-Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-<n>` de la pull request (con la última rama principal fusionada) y **antes de fusionarla**. Todo se ejecuta en el entorno de pruebas en contenedores (ver "Pruebas en contenedores" en `specs/platform/design.md`): cada comando va dentro del contenedor `tests` con `npm run test:stack:run -- <comando>`, y los servicios se llaman por su nombre (`web`, `postgres`, `minio`, `mailpit`), nunca `localhost`. Los casos PP-OUT-01 a PP-OUT-08 cubren #28 (exportación a CSV y Excel); PP-OUT-09 a PP-OUT-19 cubren #35 (destinos de email con PDF y webhook firmado). Si la PR es de #28, se ejecutan solo los primeros; si es de #35, todos (los primeros sirven de regresión). Los casos de #35 necesitan Mailpit (`mailpit`, API HTTP en `http://mailpit:8025`) y un servidor HTTP local que levanta el propio test; `SMTP_HOST` ya apunta a `mailpit` en el contenedor `tests` por `docker-compose.test.yml`. Los casos con `-t "<texto>"` esperan que el programador ponga ese texto (el identificador del criterio, p. ej. `CA-OUT-04`) en el nombre del test. **Vitest sale con 0 aunque `-t` no coincida con nada**, así que esos casos se ejecutan con `--reporter=verbose` y solo se dan por superados si, además del código 0, la salida muestra al menos el número indicado de tests con ese identificador en el nombre (✓) y 0 saltados (`skipped`) o fallidos. Si no aparece ninguno, el caso es ❌ (falso verde).
+Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-<n>` de la pull request (con la última rama principal fusionada) y **antes de fusionarla**. Todo se ejecuta en el entorno de pruebas en contenedores (ver "Pruebas en contenedores" en `specs/platform/design.md`): cada comando va dentro del contenedor `tests` con `npm run test:stack:run -- <comando>`, y los servicios se llaman por su nombre (`web`, `postgres`, `minio`, `mailpit`), nunca `localhost`. Los casos PP-OUT-01 a PP-OUT-08 cubren #28 (exportación a CSV y Excel); PP-OUT-09 a PP-OUT-19 cubren #35 (destinos de email con PDF y webhook firmado). Si la PR es de #28, se ejecutan solo los primeros; si es de #35, todos (los primeros sirven de regresión). Los casos de #35 necesitan Mailpit (`mailpit`, API HTTP en `http://mailpit:8025`) y un servidor HTTP local que levanta el propio test; la PR añade `SMTP_HOST: mailpit` y `DELIVERY_POLLER_ENABLED: "false"` a `docker-compose.test.yml` (hoy no están). Los casos con `-t "<texto>"` esperan que el programador ponga ese texto (el identificador del criterio, p. ej. `CA-OUT-04`) en el nombre del test. **Vitest sale con 0 aunque `-t` no coincida con nada**, así que esos casos se ejecutan con `--reporter=verbose` y solo se dan por superados si, además del código 0, la salida muestra al menos el número indicado de tests con ese identificador en el nombre (✓) y 0 saltados (`skipped`) o fallidos. Si no aparece ninguno, el caso es ❌ (falso verde).
 
 ## Preparación
 
@@ -120,9 +120,10 @@ PP-OUT-G3 y PP-OUT-G5 incluyen los tests de `submissions-dashboard`, que deben s
 
 - **Cubre:** CA-OUT-01, RF-OUT-01, RF-OUT-02, RF-OUT-03
 - **Tipo:** automático (Vitest, BD real, SMTP real a Mailpit)
-- **Precondiciones:** ninguna (el test sube un logo PNG, crea organización, formulario, destino de email con destinatario único y la respuesta).
+- **Precondiciones:** `grep -n SMTP_HOST docker-compose.test.yml` debe devolver al menos una línea (si no, la PR olvidó añadirlo: caso ❌ con ese motivo, no un email que no llega). El test sube un logo PNG, crea organización, formulario, destino de email con destinatario único y la respuesta.
 - **Pasos:**
   ```bash
+  grep -n SMTP_HOST docker-compose.test.yml
   npm run test:stack:run -- npx vitest run src/server/outputs/delivery.integration.test.ts src/lib/outputs/pdf-model.test.ts -t "CA-OUT-01" --reporter=verbose
   ```
 - **Resultado esperado:** código de salida 0; al menos 1 test `CA-OUT-01` ejecutado (✓) y 0 saltados; en Mailpit hay exactamente 1 mensaje al destinatario, con un adjunto `application/pdf` que empieza por `%PDF-`, de tamaño > 0 y con al menos un `/Subtype /Image` (logo); el cuerpo del email no contiene ninguna respuesta.
@@ -194,7 +195,7 @@ PP-OUT-G3 y PP-OUT-G5 incluyen los tests de `submissions-dashboard`, que deben s
   ```bash
   npm run test:stack:run -- npx vitest run src/server/outputs/delivery.integration.test.ts -t "CA-OUT-11" --reporter=verbose
   ```
-- **Resultado esperado:** código de salida 0; al menos 1 test `CA-OUT-11` ejecutado (✓) y 0 saltados; tras `failed`, `retryDelivery` + procesado con el servidor ya en 200 deja `status = sent`, `attempts = 1` y 6 intentos numerados 1..6; reenviar un envío `sent` da `ConflictError`.
+- **Resultado esperado:** código de salida 0; al menos 1 test `CA-OUT-11` ejecutado (✓) y 0 saltados; tras `failed`, `retryDelivery` + procesado con el servidor ya en 200 deja `status = sent`, `attempts = 1` (el reenvío reinicia `attempts` a 0 y el intento exitoso lo deja en 1) y 6 filas `DeliveryAttempt` con `number` correlativo 1..6 (el número no se reinicia); reenviar un envío `sent` da `ConflictError`.
 
 ### PP-OUT-16 — PDF de una respuesta: contenido, descarga y tope de tamaño
 
@@ -233,7 +234,7 @@ PP-OUT-G3 y PP-OUT-G5 incluyen los tests de `submissions-dashboard`, que deben s
 
 - **Cubre:** CA-OUT-09, CA-OUT-10, CA-OUT-12, RF-OUT-01, RF-OUT-07, RF-OUT-16
 - **Tipo:** automático (Playwright)
-- **Precondiciones:** datos demo (`db:seed`); el propio spec crea una respuesta con logo y una segunda organización con un administrador.
+- **Precondiciones:** datos demo (`db:seed`); el propio spec crea una respuesta con logo y una segunda organización con un administrador. No necesita red externa: `https://example.com/hook` solo pasa la validación de sintaxis y de IP al configurarla, sin resolver DNS ni enviar nada; no marcar `BLOQUEADO` por falta de salida a internet.
 - **Pasos:**
   ```bash
   npm run test:stack:run -- npx playwright test e2e/outputs-destinations.spec.ts
@@ -259,5 +260,6 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 
 - 2026-11-26 — Issue #35: PP-OUT-09 a PP-OUT-19 para CA-OUT-01, CA-OUT-03, CA-OUT-07 a CA-OUT-13, RF-OUT-13 y RNF-OUT-05/06; comprobaciones manuales del PDF, SMTP real y reinicio.
 
+- 2026-11-26 — Revisión del arquitecto (#35): `SMTP_HOST` lo añade la PR (precondición en PP-OUT-09); PP-OUT-15 aclara `attempts` y `number`; PP-OUT-19 no usa red externa.
 - 2026-11-26 — Plan de pruebas inicial (#28): PP-OUT-01 a PP-OUT-08 para CA-OUT-02, CA-OUT-04, CA-OUT-05, CA-OUT-06 y RF-OUT-11/12; CA-OUT-01 y CA-OUT-03 quedan para el issue de email y webhook.
 - 2026-11-26 — Revisión del arquitecto (#28): los casos con `-t` usan `--reporter=verbose` y exigen un mínimo de tests ejecutados y 0 saltados; PP-OUT-06 y PP-OUT-07 filtran por identificador; PP-OUT-03 incluye xlsx y bordes de fórmulas; PP-OUT-07 incluye el test del handler; PP-OUT-08 añade el 404 de formulario inexistente.

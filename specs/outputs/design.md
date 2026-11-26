@@ -545,6 +545,10 @@ export type GeneratedPdf = { buffer: Buffer; imagesIncluded: boolean };
 /** 1. organizationName (organization.repository). 2. model = buildPdfModel(...).
  *  3. Carga logo e imágenes con readFileBytes; las que fallan, no son JPG/PNG o no existen se sustituyen por el
  *     texto «[imagen no incluida: formato no admitido en PDF]» / «[imagen no disponible]» sin lanzar.
+ *     Tope de lectura por imagen: MAX_IMAGE_READ_BYTES = 5 * 1024 * 1024 (5 MB, constante del módulo). Si el
+ *     fichero supera el tope (se comprueba con el tamaño registrado en el almacenamiento antes de leerlo, o con
+ *     bytes.length al leerlo si el adaptador no lo da; en ese caso se descarta de inmediato), se sustituye por
+ *     «[imagen no disponible]», igual que las que no se pueden leer. Este tope aplica también al logo.
  *  4. Renderiza con imágenes; si buffer.length > maxBytes, renderiza sin imágenes y con el aviso
  *     «Este PDF no incluye las imágenes por su tamaño. Consúltalas en <viewUrl>» (imagesIncluded=false).
  *     Si aun así supera maxBytes, lanza Error("PDF_TOO_LARGE") (el envío falla con código PDF).
@@ -731,7 +735,7 @@ Regla de nombres: igual que en #28 (cada `it` contiene el identificador que cubr
 - `CA-OUT-03`: servidor que responde 500; tras `createSubmission` y 5 rondas de `processDueDeliveries` con `now` avanzando según el backoff: `Delivery.status = failed`, `attempts = 5`, 5 filas `DeliveryAttempt` con `ok=false` y `statusCode=500`, `lastError = "HTTP_500"`, y la `Submission` existe.
 - `CA-OUT-07`: servidor que responde 200; la petición recibida tiene `X-FormIA-Signature`, `X-FormIA-Timestamp` y `X-FormIA-Event`; `verifyWebhookSignature(secretDelDestino, timestamp, cuerpoCrudo, cabecera)` es `true`; con otro secreto, `false`; el JSON tiene `answers` con claves `{ key }` (sin `http`) y `form` con el snapshot.
 - `CA-OUT-08`: `createSubmission` dos veces con el mismo `clientId` y `processDueDeliveries` entre medias y al final: 1 sola fila `Delivery` por destino, exactamente 1 mensaje en Mailpit y 1 POST recibido.
-- `CA-OUT-11`: webhook que primero responde 500 hasta `failed`; el servidor pasa a 200; `retryDelivery` (org correcta) → `processDueDeliveries`: `status = sent`, `attempts = 1`, 6 `DeliveryAttempt` (numerados 1..6); `retryDelivery` sobre un envío `sent` -> `ConflictError`; `retryDelivery` con la organización B -> `NotFoundError`.
+- `CA-OUT-11`: webhook que primero responde 500 hasta `failed`; el servidor pasa a 200; `retryDelivery` (org correcta) → `processDueDeliveries`: `status = sent`, `attempts = 1`, 6 `DeliveryAttempt` (numerados 1..6). Aclaración: `retryDelivery` reinicia `Delivery.attempts` a 0 (nueva ronda de 5), mientras que `DeliveryAttempt.number` sigue siendo correlativo por envío (los 5 de la primera ronda + el 6.º); por eso tras el reenvío exitoso `attempts = 1` y existen 6 filas. Además, test `MAX_IMAGE_READ_BYTES`: una imagen de más de 5 MB se sustituye por «[imagen no disponible]» (CA-OUT-13); `retryDelivery` sobre un envío `sent` -> `ConflictError`; `retryDelivery` con la organización B -> `NotFoundError`.
 - `CA-OUT-09`: `listDeliveries` y `retryDelivery` con la organización B sobre datos de A lanzan `NotFoundError`.
 - `RF-OUT-13`: destino de webhook a un puerto cerrado: `createSubmission` termina con `created: true` y la respuesta existe aunque el envío falle.
 - `RNF-OUT-05`: con espías en `console.log/error/warn` durante un ciclo completo (email y webhook), ninguna línea contiene el destinatario, la URL, el secreto ni un valor de `answers`.
@@ -762,5 +766,6 @@ Regla de nombres: igual que en #28 (cada `it` contiene el identificador que cubr
 ## Historial de cambios
 
 - 2026-11-26 — Diseño de destinos y envíos (#35): modelos `Destination`, `Delivery` y `DeliveryAttempt`; cola en PostgreSQL con procesador periódico en `instrumentation.ts`; PDF con `@react-pdf/renderer` desde `buildPdfModel`; webhook firmado con protección SSRF; acciones, ruta del PDF y pantalla de destinos; variables de entorno nuevas; tareas y tests.
+- 2026-11-26 — Revisión del arquitecto (#35): tope de 5 MB por imagen leída (`MAX_IMAGE_READ_BYTES`); aclarado que `retryDelivery` reinicia `attempts` y `DeliveryAttempt.number` es correlativo.
 - 2026-11-26 — Diseño inicial (#28): exportación a CSV y xlsx reutilizando el filtrado del listado; unión de versiones; `Submission.formVersionNumber` nullable; enlace autenticado a fotos y firmas; neutralización de fórmulas; `exceljs` como dependencia nueva.
 - 2026-11-26 — Revisión del arquitecto (#28): `baseUrl` desde `AUTH_URL` u `origin`; casos de borde de `neutralizeFormula`; xlsx siempre con texto, nunca fórmula; test de `filename`; test del handler; regla de nombres de test con el identificador; fotos separadas por `\n`; `Submission.formVersionNumber` aprobado (lo rellenará `form-publishing`).
