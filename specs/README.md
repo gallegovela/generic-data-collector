@@ -44,7 +44,7 @@ flowchart TD
 | 8 | [form-publishing](form-publishing/README.md) | `PUB` | Publicación, versiones, enlace y código QR | borrador |
 | 9 | [ai-assistant](ai-assistant/README.md) | `AI` | Creación y modificación de formularios con IA a partir de texto o foto | borrador |
 | 10 | [submissions-dashboard](submissions-dashboard/README.md) | `SUB` | Recepción de respuestas, listado, ficha y filtros | diseñado |
-| 11 | [outputs](outputs/README.md) | `OUT` | Email con PDF, Excel, CSV y webhooks | borrador |
+| 11 | [outputs](outputs/README.md) | `OUT` | Email con PDF, Excel, CSV y webhooks | requisitos listos |
 | 12 | [public-api](public-api/README.md) | `API` | API REST de solo lectura con claves por organización | borrador |
 | 13 | [privacy-gdpr](privacy-gdpr/README.md) | `GDPR` | RGPD transversal: logs, retención, exportación y borrado de una organización | borrador |
 | 14 | [demo-seed](demo-seed/README.md) | `SEED` | Datos de ejemplo y recorrido de la demo con Playwright | borrador |
