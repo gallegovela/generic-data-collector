@@ -11,13 +11,15 @@ Guardar de forma privada y segura fotos, firmas, logos y documentos, con una int
 ## Alcance
 
 **Incluido**
-- Adaptador de almacenamiento con implementación S3/MinIO y Azure Blob.
+- Adaptador de almacenamiento con implementación S3 (MinIO en local). Azure Blob se usa en modo compatible con S3, cambiando solo variables de entorno (RNF-STO-03); no hay un adaptador Azure aparte.
 - Subida de archivos desde la PWA (también diferida tras el modo sin conexión).
 - URLs firmadas de corta duración para ver y descargar.
 - Organización de claves por organización.
 
 **Fuera de alcance**
 - Procesado de vídeo, antivirus (se anota como mejora).
+- Subida pública anónima de un formulario publicado (la hará `field-collector` reutilizando el servicio de #25).
+- Reducción de fotos en el dispositivo (RF-STO-05, `field-collector`).
 
 ## Requisitos funcionales
 
@@ -59,5 +61,6 @@ Guardar de forma privada y segura fotos, firmas, logos y documentos, con una int
 
 ## Historial de cambios
 
+- 2026-11-26 — Revisión del arquitecto: alcance S3/Azure en modo S3 y fuera de alcance ampliado (#25).
 - 2026-11-26 — RF-STO-08 a RF-STO-11, RNF-STO-04, CA-STO-03 a CA-STO-05; RF-STO-07 acotado; estado "diseñado" (#25).
 - 2026-11-14 — Creación del módulo.

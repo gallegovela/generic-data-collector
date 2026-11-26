@@ -75,7 +75,7 @@ No hay G5 (Playwright): #25 no tiene interfaz ni toca el recorrido de la demo.
   ```bash
   npm run test:stack:run -- npx vitest run src/server/storage/storage.service.test.ts src/server/storage/stored-file.repository.test.ts -t "idempot"
   ```
-- **Resultado esperado:** código de salida 0 y al menos 3 tests: la misma subida dos veces devuelve la misma clave (`created` true y luego false), hay 1 fila y 1 objeto; dos subidas simultáneas (`Promise.all`) con el mismo `uploadId` dejan 1 fila; el mismo `uploadId` con otro `kind` lanza `ConflictError`.
+- **Resultado esperado:** código de salida 0 y al menos 4 tests: la misma subida dos veces devuelve la misma clave (`created` true y luego false), hay 1 fila y 1 objeto; dos subidas simultáneas (`Promise.all`) con el mismo `uploadId` dejan 1 fila; dos subidas simultáneas con el mismo `uploadId` y contenido de distinto tipo como `photo` (JPG y PNG, claves distintas) dejan 1 fila y un solo objeto en el adaptador en memoria (se borra el sobrante); el mismo `uploadId` con otro `kind` lanza `ConflictError`.
 
 ### PP-STO-06 — Clave y detección de tipo
 
@@ -139,4 +139,5 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 
 ## Historial de cambios
 
+- 2026-11-26 — PP-STO-05: caso de carrera con distinto tipo (revisión del arquitecto) (#25)
 - 2026-11-26 — Plan de pruebas inicial (#25)

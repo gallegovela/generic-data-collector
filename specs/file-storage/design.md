@@ -12,9 +12,9 @@ Se construye un servicio de almacenamiento privado sobre S3 (MinIO en local). Tr
 2. **Una sola ruta de lectura** `GET /api/files?key=...` (RF-STO-09): comprueba sesión y que la clave empieza por `org/<organizationId de la sesión>/` y exista en `StoredFile`; responde `302` a una URL firmada de 900 s como máximo. Panel, PDF y exportación usan esa ruta.
 3. **Tabla propia `StoredFile`** (RF-STO-11) con los metadatos, para huérfanos y borrado por organización. Sin clave foránea a `Submission` (mismo criterio que `submissions-dashboard`: `submissionId` es un identificador lógico, porque `field-collector` aún no existe).
 
-Los tipos se validan por **firma binaria** (magic bytes) con una función propia de unas pocas líneas, sin dependencia nueva (JPG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`, WEBP `RIFF....WEBP`, HEIC `....ftyp` + marca `heic|heix|heif|mif1|msf1|hevc`, PDF `%PDF-`).
+Los tipos se validan por **firma binaria** (magic bytes) con una función propia de unas pocas líneas, sin dependencia nueva (JPG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`, WEBP `RIFF....WEBP`, HEIC `ftyp` en los bytes 4-11 (`....ftyp` + marca de 4 bytes en 8-11) `heic|heix|heif|mif1|msf1|hevc`, PDF `%PDF-`).
 
-El adaptador es una interfaz (`StorageAdapter`) con una implementación S3 (`@aws-sdk/client-s3` y `@aws-sdk/s3-request-presigner`, **dependencias nuevas, pendientes de aprobación del arquitecto**; valen para MinIO y para Azure Blob en modo S3). Para los tests unitarios hay una implementación en memoria; el adaptador S3 se prueba contra el MinIO del entorno de pruebas.
+El adaptador es una interfaz (`StorageAdapter`) con una implementación S3 (`@aws-sdk/client-s3` y `@aws-sdk/s3-request-presigner`, **dependencias nuevas, aprobadas por el arquitecto en #25**; valen para MinIO y para Azure Blob en modo S3). Para los tests unitarios hay una implementación en memoria; el adaptador S3 se prueba contra el MinIO del entorno de pruebas.
 
 Las URLs firmadas se generan para `S3_PUBLIC_ENDPOINT` (opcional; por defecto `S3_ENDPOINT`): dentro de Docker la app habla con `http://minio:9000`, que el navegador no alcanza. Si `S3_PUBLIC_ENDPOINT` está definido, el cliente de firma usa ese host.
 
@@ -200,7 +200,9 @@ Algoritmo de `uploadFile`:
 1. `bytes.byteLength === 0` → `ValidationError`. `> STORAGE_MAX_UPLOAD_BYTES` → `PayloadTooLargeError` (nuevo, ver Errores).
 2. `detectFileType(bytes)`; si es `null` o no está en `ALLOWED_CONTENT_TYPES[kind]` → `UnsupportedMediaTypeError` (nuevo). **Nada se ha escrito todavía** (CA-STO-04).
 3. `findByUploadId`: si existe → devuelve `{ file, created: false }` sin tocar el almacenamiento (CA-STO-05). Si existe con otro `kind` → `ConflictError`.
-4. `key = buildFileKey(...)`; `adapter.put(...)`; luego `createIfAbsent(...)`. Si falla el INSERT, se intenta `adapter.delete(key)` (silencioso) y se relanza.
+4. `key = buildFileKey(...)`; `adapter.put(...)`; luego `createIfAbsent(...)`.
+   - Si falla el INSERT, se intenta `adapter.delete(key)` (silencioso) y se relanza.
+   - Si `createIfAbsent` devuelve `created=false` (subida simultánea con el mismo `uploadId`) y `record.key !== key` (la extensión depende del tipo detectado, así que otro tipo da otra clave), se borra con `adapter.delete(key)` el objeto recién escrito y se devuelve el registro existente con `created: false`. Si `record.key === key` no se borra nada (es el mismo objeto). Si `record.kind` difiere del pedido, se borra igual el objeto sobrante y se lanza `ConflictError`.
 5. Registro en log: `{ event: "file.uploaded", key, sizeBytes }` (RNF-STO-04); nunca bytes ni nombre original.
 
 `getSignedFileUrl`: `findByKey(organizationId, key)`; ausente → `NotFoundError` (CA-STO-02, mismo error si la clave no existe: no se revela). TTL = `min(STORAGE_SIGNED_URL_TTL_SECONDS, 900)`.
@@ -273,6 +275,10 @@ sequenceDiagram
 - No se guarda nombre original del archivo (puede contener datos personales).
 - Logs solo con `key` y `sizeBytes` (RNF-STO-04). Los metadatos de la petición (`FormData`) nunca se registran.
 - Datos personales: las fotos y firmas pueden serlo; alojamiento en la UE depende del despliegue (RNF-STO-02, ya cubierto por `platform`).
+- **Límite de tamaño en el despliegue:** un proxy como nginx (1 MB por defecto) puede devolver 413 antes de llegar a la app. En el despliegue, `client_max_body_size` debe ser ≥ `STORAGE_MAX_UPLOAD_BYTES` (más el margen de 1 MB del multipart). Si no, fallarán las fotos del móvil en la demo.
+- **Lectura por cualquier sesión de la organización:** un `collector` puede abrir cualquier archivo de su organización si conoce la clave. Es aceptable en el piloto: la clave lleva un UUID no enumerable.
+- **S3_PUBLIC_ENDPOINT en producción:** cómo se expone el almacenamiento al navegador (nginx delante de MinIO, Azure o S3 público) lo decide el despliegue, no #25. En `.env.example` la variable va comentada o vacía: si apuntara a `localhost`, el entorno de pruebas firmaría URLs inalcanzables desde el contenedor `tests`.
+- **Riesgo HEIC:** los navegadores no muestran HEIC en `<img>`. Se guarda tal cual; `field-collector` y el panel tendrán que tenerlo en cuenta (no se convierte en #25).
 
 ## Tests
 
@@ -288,6 +294,19 @@ sequenceDiagram
 | RNF-STO-01, RNF-STO-03 | Vitest (integración con MinIO) | `src/server/storage/s3-storage-adapter.integration.test.ts` |
 | RNF-STO-04 | Vitest | `src/server/storage/storage.service.test.ts` |
 
+**Nombres obligatorios de `describe`/`it`:** los casos del plan filtran con `-t`; si el texto no aparece, Vitest ejecuta 0 tests y sale con código 0. Cada filtro tiene que encontrar al menos los tests indicados en el plan:
+
+| Filtro `-t` | Texto que debe contener el nombre del test | Mínimo |
+| --- | --- | --- |
+| `expired` | "expired" (URL caducada, 403) | 1 |
+| `privado` | "privado" (bucket sin firma, 403) | 1 |
+| `otra organización` | "otra organización" | 2 |
+| `firmada` | "firmada" | 2 |
+| `rechaza` | "rechaza" | 5 |
+| `idempot` | "idempotente" | 4 |
+| `huérfan` | "huérfanos" | 3 |
+| `STORAGE\|S3_PUBLIC\|log` | "STORAGE…", "S3_PUBLIC_ENDPOINT…", "log…" | 3 |
+
 Los tests del servicio usan `InMemoryStorageAdapter` y un repositorio con Prisma real (como `submission.repository.test.ts`) o mockeado, según el patrón del módulo vecino. Los de la ruta mockean `requireSession` y el servicio. Los de integración con MinIO se saltan si `STORAGE_INTEGRATION` no vale `1` (`describe.skipIf`), porque en el desarrollo sin MinIO no deben fallar; el plan de pruebas los activa.
 
 ## Tareas de desarrollo
@@ -300,4 +319,5 @@ Los tests del servicio usan `InMemoryStorageAdapter` y un repositorio con Prisma
 
 ## Historial de cambios
 
+- 2026-11-26 — Revisión del arquitecto: borrado del objeto sobrante en la carrera con extensiones distintas, notas de despliegue (nginx), HEIC y lectura por sesión (#25).
 - 2026-11-26 — Diseño inicial: adaptador S3, tabla `StoredFile`, rutas `POST`/`GET /api/files`, URLs firmadas (#25).
