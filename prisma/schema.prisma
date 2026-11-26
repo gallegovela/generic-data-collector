@@ -119,6 +119,10 @@ model Submission {
   formVersionSnapshot Json
   answers             Json
   submittedByName     String?
+  // #27: identificadores lógicos, sin clave foránea (como formId).
+  formVersionId       String?
+  formVersionNumber   Int?
+  submittedByUserId   String?
   capturedAt          DateTime
   syncedAt            DateTime @default(now())
   createdAt           DateTime @default(now())
@@ -127,5 +131,6 @@ model Submission {
 
   @@unique([organizationId, clientId])
   @@index([organizationId, formId, capturedAt])
+  @@index([organizationId, formId, formVersionNumber])
   @@map("submissions")
 }

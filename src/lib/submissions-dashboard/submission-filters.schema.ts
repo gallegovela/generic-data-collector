@@ -8,6 +8,7 @@ export const submissionFiltersSchema = z.object({
   fieldId: z.string().min(1).optional(),
   fieldValue: z.string().min(1).optional(),
   q: z.string().trim().min(1).optional(),
+  version: z.coerce.number().int().positive().optional(),
   page: z.coerce.number().int().positive().default(1),
 });
 export type SubmissionFiltersInput = z.infer<typeof submissionFiltersSchema>;

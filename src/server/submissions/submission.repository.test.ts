@@ -12,6 +12,7 @@ import {
   findSubmissionById,
   findSubmissionIdsByText,
   getSubmissionStats,
+  listFormVersionNumbers,
   listSubmissionsByForm,
 } from "./submission.repository";
 
@@ -142,5 +143,50 @@ describe("submission.repository", () => {
     const fields = await findFilterableFields(orgA.id, "shared-form");
     expect(fields.map((f) => f.id)).toEqual(["has_incidents"]);
     expect(await findFilterableFields(orgA.id, "no-existe")).toEqual([]);
+  });
+});
+
+// Cubre: CA-SUB-14 (PP-SUB-18)
+describe("CA-SUB-14", () => {
+  let orgA: { id: string };
+  let orgB: { id: string };
+
+  const add = (orgId: string, clientId: string, version?: number) =>
+    createSubmissionFixture(orgId, {
+      formId: "ver-form",
+      formTitle: DAILY_REPORT_FORM_TITLE,
+      clientId,
+      formVersionSnapshot: buildDailyReportFormVersion(),
+      answers: {},
+      capturedAt: new Date(),
+      ...(version === undefined ? {} : { formVersionId: `v${version}`, formVersionNumber: version }),
+    });
+
+  beforeAll(async () => {
+    orgA = await createOrganization({ name: "Org A (CA-SUB-14 test)" });
+    orgB = await createOrganization({ name: "Org B (CA-SUB-14 test)" });
+    await add(orgA.id, "v-1", 1);
+    await add(orgA.id, "v-2", 2);
+    await add(orgA.id, "v-3", 2);
+    await add(orgA.id, "v-null");
+    await add(orgB.id, "v-b", 7);
+  });
+
+  afterAll(async () => {
+    await prisma.submission.deleteMany({ where: { organizationId: { in: [orgA.id, orgB.id] } } });
+    await prisma.organization.deleteMany({ where: { id: { in: [orgA.id, orgB.id] } } });
+  });
+
+  it("filtra el listado por formVersionNumber y devuelve la versión de cada fila", async () => {
+    const v2 = await listSubmissionsByForm(orgA.id, "ver-form", { page: 1, formVersionNumber: 2 });
+    expect(v2.total).toBe(2);
+    expect(v2.items.every((i) => i.formVersionNumber === 2)).toBe(true);
+    const all = await listSubmissionsByForm(orgA.id, "ver-form", { page: 1 });
+    expect(all.total).toBe(4);
+    expect(all.items.some((i) => i.formVersionNumber === null)).toBe(true);
+  });
+
+  it("listFormVersionNumbers devuelve [1, 2] sin NULL ni versiones de otra organización", async () => {
+    expect(await listFormVersionNumbers(orgA.id, "ver-form")).toEqual([1, 2]);
   });
 });
