@@ -66,6 +66,10 @@ Llevar las respuestas a donde el cliente las necesita: un email con PDF, Excel o
 
 - Exportación (#28): sin colas ni streaming en el piloto; el servidor construye el fichero en memoria con un máximo de 10 000 filas (`EXPORT_MAX_ROWS`); por encima, error 400 que pide acotar con filtros. 5 000 filas caben en RNF-OUT-03.
 - Exportación (#28): el enlace a fotos y firmas se forma con una función aislada (`buildFileExportLink`) que trata la clave como referencia opaca; `file-storage` fijará la ruta real y solo tendrá que cambiar esa función.
+- Exportación (#28): el origen de los enlaces a archivos es `AUTH_URL` si está definida (ya figura en `.env.example`) y, si no, `request.nextUrl.origin`; detrás de un proxy `origin` puede ser un host interno.
+- Exportación (#28): un formulario sin respuestas en la organización (o inexistente, o de otra organización) da 404 con el mismo cuerpo; la interfaz solo ofrece los botones si `total > 0`, y unos filtros sin coincidencias dan 200 con solo cabeceras.
+- Exportación (#28): el CSV escribe los números con punto decimal; Excel en configuración regional española puede leerlos como texto. Limitación conocida del piloto. Los valores de texto como `+34600123456` (solo dígitos) no se neutralizan porque no son fórmulas.
+- Exportación (#28): las fotos múltiples de una celda se separan con un salto de línea.
 
 - Sin colas en el piloto: los envíos se procesan en segundo plano dentro del propio proceso, con estado persistido en base de datos para poder reintentar.
 
@@ -73,3 +77,4 @@ Llevar las respuestas a donde el cliente las necesita: un email con PDF, Excel o
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — Issue #28 (exportación a CSV y Excel): RF-OUT-06 decidido (columnas por `id` de campo, unión de versiones, columna de versión, fotos y firmas como enlace autenticado y no URL firmada de larga duración); nuevos RF-OUT-11 y RF-OUT-12; nuevos CA-OUT-04, CA-OUT-05 y CA-OUT-06; supuestos de la exportación.
+- 2026-11-26 — Issue #28, revisión del arquitecto: `AUTH_URL` para los enlaces, 404 sin respuestas, limitación del CSV con números, fotos separadas por salto de línea. `Submission.formVersionNumber` aprobado (lo rellenará `form-publishing`).

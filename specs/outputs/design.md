@@ -75,7 +75,8 @@ export type SubmissionExportQuery = z.infer<typeof submissionExportQuerySchema>;
 // src/lib/outputs/cell-safety.ts
 /** Si `text` empieza por "=", "+", "-" o "@" (o tabulador / retorno de carro), antepone "'".
  *  Excepción: una cadena puramente numérica o de coordenadas (/^[+-]?\d+(\.\d+)?(, [+-]?\d+(\.\d+)?)?$/)
- *  se devuelve intacta (no puede ser una fórmula). Cubre: RF-OUT-12 */
+ *  se devuelve intacta (no puede ser una fórmula). Por tanto "+34600123456" queda intacto (aceptado),
+ *  mientras que "-1+1", "=SUMA(A1)", "\t=1" y "\r=1" se prefijan. Cubre: RF-OUT-12 */
 export function neutralizeFormula(text: string): string;
 ```
 
@@ -99,7 +100,7 @@ export type ExportCell = string | number | null; // null = celda vacía
  *  - single_choice -> label de la opción (si no existe, el id crudo)
  *  - multiple_choice -> labels unidas con ", "
  *  - yes_no -> "Sí" / "No"
- *  - photo -> enlaces de buildFileLink unidos con " "
+ *  - photo -> enlaces de buildFileLink unidos con "\n"
  *  - signature -> buildFileLink(file)
  *  - gps -> `${lat}, ${lng}`
  *  - section -> null
@@ -164,6 +165,7 @@ export function buildExportHref(
 ```ts
 // src/server/outputs/xlsx.ts
 /** Hoja "Respuestas"; fila 1 = cabeceras en negrita y congelada; los number como número.
+ *  Las cadenas se escriben SIEMPRE como valor de texto, nunca como `{ formula }` de exceljs.
  *  Devuelve el contenido del .xlsx. Cubre: RF-OUT-05, CA-OUT-02 */
 export function serializeXlsx(table: ExportTable): Promise<Buffer>;
 ```
@@ -228,7 +230,9 @@ export function exportSubmissions(
 | --- | --- | --- |
 | `/api/forms/[id]/submissions/export?format=xlsx\|csv&dateFrom&dateTo&submittedBy&fieldId&fieldValue&q` | `GET` | 200 con el fichero, `Content-Type`, `Content-Disposition: attachment; filename="<filename>"`, `Cache-Control: no-store`. |
 
-El handler: `requireSession({ role: "admin" })` → `submissionExportQuerySchema.safeParse` de `searchParams` (cadenas vacías = ausentes) → `exportSubmissions(user.organizationId, id, query, request.nextUrl.origin)`. `export const dynamic = "force-dynamic"`.
+El handler: `requireSession({ role: "admin" })` → `submissionExportQuerySchema.safeParse` de `searchParams` (cadenas vacías = ausentes) → `exportSubmissions(user.organizationId, id, query, baseUrl)`. `export const dynamic = "force-dynamic"`.
+
+`baseUrl` se resuelve en el handler, no en las funciones puras: `process.env.AUTH_URL` si está definida y no vacía (sin barra final); si no, `request.nextUrl.origin`. `AUTH_URL` ya está en `.env.example`. El filename del `Content-Disposition` sale de `slug(formTitle)` (solo `[a-z0-9-]`), lo que impide inyectar cabeceras.
 
 ## Errores
 
@@ -252,15 +256,18 @@ El handler: `requireSession({ role: "admin" })` → `submissionExportQuerySchema
 
 | Criterio / Requisito | Tipo | Fichero |
 | --- | --- | --- |
-| RF-OUT-12, CA-OUT-05 | Vitest | `src/lib/outputs/cell-safety.test.ts` — `=1+1`, `+1`, `-x`, `@a` se prefijan con `'`; `-3.5` y `40.4, -3.7` no; texto normal intacto. |
-| RF-OUT-06 | Vitest | `src/lib/outputs/format-cell.test.ts` — un caso por tipo de campo, vacío, y `=...` neutralizado. |
+| RF-OUT-12, CA-OUT-05 | Vitest | `src/lib/outputs/cell-safety.test.ts` — `=1+1`, `=SUMA(A1)`, `-1+1`, `+1a`, `-x`, `@a`, `\t=1` y `\r=1` se prefijan con `'`; `-3.5`, `40.4, -3.7` y `+34600123456` quedan intactos; texto normal intacto. |
+| RF-OUT-06, CA-OUT-05 | Vitest | `src/lib/outputs/format-cell.test.ts` — un caso por tipo de campo, vacío, fotos separadas por `\n`, y `=...` neutralizado. |
 | RF-OUT-06 | Vitest | `src/lib/outputs/file-link.test.ts` — clave con `/` y espacios codificada; baseUrl sin barra final. |
 | CA-OUT-04, CA-OUT-02 | Vitest | `src/lib/outputs/export-table.test.ts` — v1+v2: columna nueva con vacío en la fila v1; etiqueta de la más reciente; campo retirado en v2 se conserva; sin filas = solo cabeceras; snapshot inválido no rompe. |
 | RNF-OUT-04 | Vitest | `src/lib/outputs/csv.test.ts` — BOM, `;`, comillas, saltos de línea. |
-| CA-OUT-02 | Vitest | `src/server/outputs/xlsx.test.ts` — cargar el buffer con exceljs: 1 fila de cabecera + 3 de datos; un `number` es numérico. |
-| RF-OUT-11, CA-OUT-06 | Vitest | `src/server/outputs/export.service.test.ts` (BD real) — coincide con `listSubmissionsByForm` con los mismos filtros; org B pidiendo el formulario de A -> `NotFoundError`; más de `EXPORT_MAX_ROWS` -> `ValidationError` (con el máximo parametrizable por mock de la constante). |
-| RF-OUT-11 | Vitest | `src/server/submissions/submission.repository.test.ts` — `listSubmissionsForExport` y `countSubmissionsOfForm` no devuelven datos de otra organización con el mismo `formId`. |
-| CA-OUT-02, CA-OUT-04, CA-OUT-05, CA-OUT-06 | Playwright | `e2e/outputs-export.spec.ts` — descarga real de CSV y xlsx por la ruta con sesión admin; 401 sin sesión; 403 collector; 404 de otra organización. |
+| CA-OUT-02, CA-OUT-05 | Vitest | `src/server/outputs/xlsx.test.ts` — cargar el buffer con exceljs: 1 fila de cabecera + 3 de datos; un `number` es numérico; una celda `=1+1` queda como `'=1+1` con `cell.type === ExcelJS.ValueType.String` (no `Formula`). |
+| RF-OUT-11, CA-OUT-06 | Vitest | `src/server/outputs/export.service.test.ts` (BD real) — coincide con `listSubmissionsByForm` con los mismos filtros; org B pidiendo el formulario de A -> `NotFoundError`; más de `EXPORT_MAX_ROWS` -> `ValidationError` (con el máximo parametrizable por mock de la constante); el `baseUrl` recibido aparece en los enlaces de archivos; `filename` con título con saltos de línea, comillas y acentos (`"Parte\n\"Obra\" ñ é"`) da solo `[a-z0-9-]`. |
+| RF-OUT-11, CA-OUT-06 | Vitest | `src/server/submissions/submission.repository.test.ts` — `listSubmissionsForExport` y `countSubmissionsOfForm` no devuelven datos de otra organización con el mismo `formId`. |
+| RF-OUT-11 | Vitest | Test del handler (`src/app/api/forms/[id]/submissions/export/route.test.ts`) — `baseUrl` = `AUTH_URL` si está definida y, si no, `request.nextUrl.origin`. |
+| CA-OUT-02, CA-OUT-04, CA-OUT-05, CA-OUT-06 | Playwright | `e2e/outputs-export.spec.ts` — descarga real de CSV y xlsx por la ruta con sesión admin; 401 sin sesión; 403 collector; 404 de otra organización y 404 de un formulario inexistente con el mismo cuerpo. |
+
+**Regla de nombres:** el nombre de cada test (`it`/`test`, en todos los ficheros de arriba) debe contener el identificador del requisito o criterio que cubre (`CA-OUT-04`, `RF-OUT-11`...), porque el plan de pruebas filtra con `-t` y verifica que se ejecutan.
 
 ## Tareas de desarrollo
 
@@ -273,10 +280,11 @@ El handler: `requireSession({ role: "admin" })` → `submissionExportQuerySchema
 | 5 | `xlsx.ts` + test | 2, 4 |
 | 6 | Refactor `buildSubmissionWhere` y `toListFilters` (los tests de #7 siguen verdes) + nuevas funciones del repositorio + tests | 1 |
 | 7 | `export.service.ts` + test | 4, 5, 6 |
-| 8 | Route handler | 7 |
+| 8 | Route handler (con `baseUrl` = `AUTH_URL` o `origin`) y su test | 7 |
 | 9 | `export-buttons.tsx` y cambio en la página del listado | 4, 8 |
 | 10 | Fixture v2, helper e2e y `e2e/outputs-export.spec.ts` | 8, 9 |
 
 ## Historial de cambios
 
 - 2026-11-26 — Diseño inicial (#28): exportación a CSV y xlsx reutilizando el filtrado del listado; unión de versiones; `Submission.formVersionNumber` nullable; enlace autenticado a fotos y firmas; neutralización de fórmulas; `exceljs` como dependencia nueva.
+- 2026-11-26 — Revisión del arquitecto (#28): `baseUrl` desde `AUTH_URL` u `origin`; casos de borde de `neutralizeFormula`; xlsx siempre con texto, nunca fórmula; test de `filename`; test del handler; regla de nombres de test con el identificador; fotos separadas por `\n`; `Submission.formVersionNumber` aprobado (lo rellenará `form-publishing`).
