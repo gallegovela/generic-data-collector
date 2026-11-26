@@ -46,16 +46,19 @@ export async function findSubmissionIdsByText(
   return rows.map((r) => r.id);
 }
 
-export async function listSubmissionsByForm(
+export type SubmissionExportFilters = Omit<SubmissionListFilters, "page">;
+
+/** Devuelve null si textQuery no encuentra ningún id (resultado vacío seguro). */
+async function buildSubmissionWhere(
   organizationId: string,
   formId: string,
-  filters: SubmissionListFilters,
-): Promise<{ items: SubmissionListItem[]; total: number }> {
+  filters: SubmissionExportFilters,
+): Promise<Prisma.SubmissionWhereInput | null> {
   const where: Prisma.SubmissionWhereInput = { organizationId, formId };
 
   if (filters.textQuery) {
     const ids = await findSubmissionIdsByText(organizationId, formId, filters.textQuery);
-    if (ids.length === 0) return { items: [], total: 0 };
+    if (ids.length === 0) return null;
     where.id = { in: ids };
   }
   if (filters.dateFrom || filters.dateTo) {
@@ -73,6 +76,59 @@ export async function listSubmissionsByForm(
   if (filters.fieldFilter) {
     where.answers = { path: [filters.fieldFilter.fieldId], equals: filters.fieldFilter.value };
   }
+  return where;
+}
+
+/** Nº de respuestas del formulario en la organización, sin filtros. Cubre: RF-OUT-11 */
+export function countSubmissionsOfForm(organizationId: string, formId: string): Promise<number> {
+  return prisma.submission.count({ where: { organizationId, formId } });
+}
+
+/** Mismas filas que el listado sin paginar. Cubre: RF-OUT-05, RF-OUT-11 */
+export async function listSubmissionsForExport(
+  organizationId: string,
+  formId: string,
+  filters: SubmissionExportFilters,
+  limit: number,
+): Promise<
+  Array<
+    Pick<
+      Submission,
+      | "formTitle"
+      | "capturedAt"
+      | "syncedAt"
+      | "submittedByName"
+      | "formVersionNumber"
+      | "formVersionSnapshot"
+      | "answers"
+    >
+  >
+> {
+  const where = await buildSubmissionWhere(organizationId, formId, filters);
+  if (!where) return [];
+  return prisma.submission.findMany({
+    where,
+    orderBy: [{ capturedAt: "desc" }, { id: "desc" }],
+    take: limit,
+    select: {
+      formTitle: true,
+      capturedAt: true,
+      syncedAt: true,
+      submittedByName: true,
+      formVersionNumber: true,
+      formVersionSnapshot: true,
+      answers: true,
+    },
+  });
+}
+
+export async function listSubmissionsByForm(
+  organizationId: string,
+  formId: string,
+  filters: SubmissionListFilters,
+): Promise<{ items: SubmissionListItem[]; total: number }> {
+  const where = await buildSubmissionWhere(organizationId, formId, filters);
+  if (!where) return { items: [], total: 0 };
 
   const [items, total] = await Promise.all([
     prisma.submission.findMany({

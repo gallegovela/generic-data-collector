@@ -1,3 +1,4 @@
+import type { FormVersion } from "@/lib/form-schema";
 import { findUserByEmail } from "@/server/auth/user.repository";
 import { prisma } from "@/server/db/client";
 import { createSubmissionFixture } from "@/server/submissions/submission.repository";
@@ -23,20 +24,22 @@ export async function addSubmission(
     capturedAt?: Date;
     by?: string;
     title?: string;
-    version?: number;
+    formVersion?: FormVersion;
+    formVersionNumber?: number;
   } = {},
 ) {
   return createSubmissionFixture(organizationId, {
     formId,
     formTitle: opts.title ?? DAILY_REPORT_FORM_TITLE,
     clientId: `${formId}-${n}`,
-    formVersionSnapshot: buildDailyReportFormVersion(),
+    formVersionSnapshot: opts.formVersion ?? buildDailyReportFormVersion(),
     answers: opts.answers ?? { site: `Obra ${n}`, has_incidents: false },
     submittedByName: opts.by ?? "Ana Encargada",
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
-    ...(opts.version === undefined
+    // Igual que en producción: la versión publicada aporta siempre id y número juntos.
+    ...(opts.formVersionNumber === undefined
       ? {}
-      : { formVersionId: `v${opts.version}`, formVersionNumber: opts.version }),
+      : { formVersionId: `v${opts.formVersionNumber}`, formVersionNumber: opts.formVersionNumber }),
   });
 }
 

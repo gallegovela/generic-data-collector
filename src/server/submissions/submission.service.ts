@@ -25,6 +25,7 @@ import {
   insertSubmission,
   listFormVersionNumbers,
   listSubmissionsByForm,
+  type SubmissionExportFilters,
   type SubmissionListFilters,
   type SubmissionListItem,
   type SubmissionStats,
@@ -150,15 +151,15 @@ function endOfDay(date: string): Date {
   return new Date(y, m - 1, d, 23, 59, 59, 999);
 }
 
-/** Cubre: RF-SUB-05, RF-SUB-06, RF-SUB-07 */
-export async function listSubmissions(
-  organizationId: string,
-  formId: string,
-  input: SubmissionFiltersInput,
-): Promise<SubmissionListResult> {
-  const filterableFields = await findFilterableFields(organizationId, formId);
-
-  const filters: SubmissionListFilters = { page: input.page };
+/**
+ * Traduce el querystring parseado a filtros del repositorio. Lo usan el
+ * listado y el exportador. Cubre: RF-SUB-05, RF-SUB-06, RF-SUB-07, RF-OUT-11
+ */
+export function toListFilters(
+  input: Omit<SubmissionFiltersInput, "page">,
+  filterableFields: Field[],
+): SubmissionExportFilters {
+  const filters: SubmissionExportFilters = {};
   if (input.dateFrom) filters.dateFrom = startOfDay(input.dateFrom);
   if (input.dateTo) filters.dateTo = endOfDay(input.dateTo);
   if (input.submittedBy) filters.submittedBy = input.submittedBy;
@@ -175,6 +176,17 @@ export async function listSubmissions(
       };
     }
   }
+  return filters;
+}
+
+/** Cubre: RF-SUB-05, RF-SUB-06, RF-SUB-07 */
+export async function listSubmissions(
+  organizationId: string,
+  formId: string,
+  input: SubmissionFiltersInput,
+): Promise<SubmissionListResult> {
+  const filterableFields = await findFilterableFields(organizationId, formId);
+  const filters: SubmissionListFilters = { ...toListFilters(input, filterableFields), page: input.page };
 
   const [{ items, total }, versions] = await Promise.all([
     listSubmissionsByForm(organizationId, formId, filters),

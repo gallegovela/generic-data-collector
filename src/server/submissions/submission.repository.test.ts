@@ -7,6 +7,7 @@ import {
   DAILY_REPORT_FORM_TITLE,
 } from "../../../prisma/fixtures/submissions-dashboard.fixtures";
 import {
+  countSubmissionsOfForm,
   createSubmissionFixture,
   findFilterableFields,
   findSubmissionById,
@@ -14,6 +15,7 @@ import {
   getSubmissionStats,
   listFormVersionNumbers,
   listSubmissionsByForm,
+  listSubmissionsForExport,
 } from "./submission.repository";
 
 // Requiere PostgreSQL accesible vía DATABASE_URL (ver specs/submissions-dashboard/test-plan.md).
@@ -143,6 +145,35 @@ describe("submission.repository", () => {
     const fields = await findFilterableFields(orgA.id, "shared-form");
     expect(fields.map((f) => f.id)).toEqual(["has_incidents"]);
     expect(await findFilterableFields(orgA.id, "no-existe")).toEqual([]);
+  });
+
+  // Cubre: RF-OUT-11, CA-OUT-06
+  it("CA-OUT-06: las funciones de exportación no cruzan organizaciones", async () => {
+    expect(await countSubmissionsOfForm(orgB.id, "shared-form")).toBe(0);
+    expect(await listSubmissionsForExport(orgB.id, "shared-form", {}, 100)).toEqual([]);
+    expect(await listSubmissionsForExport(orgB.id, "shared-form", { textQuery: "palabraexclusiva" }, 100)).toEqual([]);
+    expect(await countSubmissionsOfForm(orgA.id, "shared-form")).toBe(1);
+    expect(await listSubmissionsForExport(orgA.id, "shared-form", {}, 100)).toHaveLength(1);
+  });
+
+  // Cubre: RF-OUT-11
+  it("RF-OUT-11: listSubmissionsForExport ordena por fecha descendente, respeta el límite y guarda la versión", async () => {
+    const base = Date.now() - 20 * day;
+    for (let i = 0; i < 3; i++) {
+      await createSubmissionFixture(orgA.id, {
+        formId: "export-form",
+        formTitle: "Export",
+        clientId: `exp-${i}`,
+        formVersionSnapshot: buildDailyReportFormVersion(),
+        answers: {},
+        formVersionNumber: 7,
+        capturedAt: new Date(base + i * 1000),
+      });
+    }
+    const rows = await listSubmissionsForExport(orgA.id, "export-form", {}, 2);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].capturedAt.getTime()).toBeGreaterThan(rows[1].capturedAt.getTime());
+    expect(rows[0].formVersionNumber).toBe(7);
   });
 });
 
