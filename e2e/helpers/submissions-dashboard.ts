@@ -35,11 +35,11 @@ export async function addSubmission(
     formVersionSnapshot: opts.formVersion ?? buildDailyReportFormVersion(),
     answers: opts.answers ?? { site: `Obra ${n}`, has_incidents: false },
     submittedByName: opts.by ?? "Ana Encargada",
-    formVersionNumber: opts.formVersionNumber,
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
-    ...(opts.version === undefined
+    // Igual que en producción: la versión publicada aporta siempre id y número juntos.
+    ...(opts.formVersionNumber === undefined
       ? {}
-      : { formVersionId: `v${opts.version}`, formVersionNumber: opts.version }),
+      : { formVersionId: `v${opts.formVersionNumber}`, formVersionNumber: opts.formVersionNumber }),
   });
 }
 

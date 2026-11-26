@@ -39,9 +39,9 @@ const versionFormId = uniqueFormId("version");
 test.describe("versiones", () => {
   test.beforeAll(async () => {
     const org = await demoOrganizationId();
-    await addSubmission(org, versionFormId, 0, { version: 1 });
-    await addSubmission(org, versionFormId, 1, { version: 2 });
-    await addSubmission(org, versionFormId, 2, { version: 2 });
+    await addSubmission(org, versionFormId, 0, { formVersionNumber: 1 });
+    await addSubmission(org, versionFormId, 1, { formVersionNumber: 2 });
+    await addSubmission(org, versionFormId, 2, { formVersionNumber: 2 });
     await addSubmission(org, versionFormId, 3); // anterior a #27: sin versión
   });
   test.afterAll(async () => deleteSubmissionsOfForms([versionFormId]));
