@@ -39,7 +39,7 @@ flowchart TD
 | 3 | [form-schema](form-schema/README.md) | `FSC` | Esquema JSON versionado del formulario (Zod), tipos de campo y lógica condicional | diseñado |
 | 4 | [theming](theming/README.md) | `THM` | Logo, colores y tipografía por organización | borrador |
 | 5 | [file-storage](file-storage/README.md) | `STO` | Fotos, firmas y logos en almacenamiento privado con URLs firmadas | diseñado |
-| 6 | [field-collector](field-collector/README.md) | `COL` | PWA para rellenar formularios en el móvil, sin conexión, con foto, firma y GPS | borrador |
+| 6 | [field-collector](field-collector/README.md) | `COL` | PWA para rellenar formularios en el móvil, sin conexión, con foto, firma y GPS | diseñado (relleno en línea, #33) |
 | 7 | [form-editor](form-editor/README.md) | `EDT` | Editor visual con arrastrar y soltar | diseñado |
 | 8 | [form-publishing](form-publishing/README.md) | `PUB` | Publicación, versiones, modo de acceso, enlace y código QR | diseñado |
 | 9 | [ai-assistant](ai-assistant/README.md) | `AI` | Creación y modificación de formularios con IA a partir de texto o foto | borrador |
