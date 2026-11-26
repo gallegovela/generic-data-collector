@@ -119,7 +119,7 @@ npm run test:stack:run -- npm run db:seed        # usuario admin y organización
   ```bash
   npm run test:stack:run -- npx vitest run src/lib/form-publishing/slug.test.ts src/server/form-publishing/form-publishing.repository.test.ts
   ```
-- **Resultado esperado:** los tests pasan: slugs de 10 caracteres del alfabeto permitido y sin repetirse en 1000 generaciones; el módulo del repositorio no exporta ninguna función que actualice o borre `FormVersion`; la columna `version` crece 1, 2, 3; un choque de `(formId, version)` produce `ConflictError`.
+- **Resultado esperado:** los tests pasan: slugs de 10 caracteres del alfabeto permitido y sin repetirse en 1000 generaciones; el módulo del repositorio no exporta ninguna función que actualice o borre `FormVersion`; la columna `version` crece 1, 2, 3; un choque de `(formId, version)` produce `ConflictError`; dos `createVersionAndPublish` seguidos con slugs distintos dejan el primero.
 
 ### PP-PUB-09 — La migración es compatible con los formularios existentes y el listado muestra la versión
 

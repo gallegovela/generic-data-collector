@@ -205,7 +205,9 @@ export class PublishValidationError extends ValidationError {
 export function findFormForPublishing(organizationId: string, formId: string):
   Promise<Form | null>; // where { id, organizationId, archivedAt: null }
 
-/** Transacción. `slug` solo se usa si el Form aún no tiene.
+/** Transacción. Dentro de la transacción se lee el Form con `organizationId` (si no existe,
+ *  devuelve null). Si ya tiene `slug`, se conserva y se IGNORA el recibido; si no, se escribe
+ *  el recibido. Así dos primeras publicaciones concurrentes nunca reasignan el slug.
  *  Calcula version = (max(version) del formId) + 1 dentro de la transacción,
  *  crea la FormVersion y actualiza el Form. Lanza ConflictError si choca
  *  @@unique([formId, version]) (publicación concurrente). Si choca el
@@ -300,6 +302,8 @@ export async function setAccessModeAction(formId: string, input: SetAccessModeIn
 
 `/api/**` y `/f/**` quedan fuera del `matcher` del middleware (solo guarda `/admin` y `/collect`), así que la autenticación de estas rutas es la que hace cada handler.
 
+El route handler del QR declara `export const runtime = "nodejs"` (la librería `qrcode` no es compatible con edge). Dependencia nueva aprobada: `qrcode` y `@types/qrcode`, con la versión fijada en `package.json`; comprobar que el build de Next.js pasa.
+
 El `qr` apunta a `buildFormLink(loadEnv().AUTH_URL, slug)`.
 
 ### Página `/f/[slug]` (`src/app/f/[slug]/page.tsx`, Server Component, `dynamic = "force-dynamic"`)
@@ -307,7 +311,7 @@ El `qr` apunta a `buildFormLink(loadEnv().AUTH_URL, slug)`.
 Llama a `getFormForFilling(slug, await getCurrentUser())` y:
 - `NotFoundError` -> `notFound()`.
 - `UnauthorizedError` -> `redirect("/login")`. (El retorno tras el login queda para `field-collector`, ver pregunta 3.)
-- `ForbiddenError` -> mensaje "Este formulario es solo para usuarios de otra organización." con estado 200 (sin `notFound`, el formulario existe); sin datos del formulario.
+- `ForbiddenError` -> mensaje "No tienes acceso a este formulario. Entra con una cuenta de la organización que lo ha publicado." con estado 200 (sin `notFound`, el formulario existe); sin datos del formulario.
 - `{ state: "closed" }` -> texto exacto **"Este formulario ya no acepta respuestas"**.
 - `{ state: "published" }` -> marcador mínimo: el título del formulario y "Rellenado disponible próximamente" (`data-testid="fill-placeholder"`); `field-collector` sustituye este bloque por la pantalla real.
 
@@ -328,7 +332,7 @@ export function PublishPanel(props: {
 - Botón `data-testid="publish-button"`: "Publicar" la primera vez, "Publicar cambios" si ya está publicado. Deshabilitado si `!canPublish`. Al pulsar, `publishFormAction`; si falla con `issues`, los lista bajo el botón; si va bien, actualiza el estado local.
 - Cuando hay `link`: campo de solo lectura con el enlace (`data-testid="form-link"`), botón "Copiar enlace", imagen del QR (`<img src="/api/forms/<id>/qr?format=png">`) y enlaces "Descargar PNG" y "Descargar SVG" (`?download=1`).
 - "Despublicar" (`AlertDialog` de confirmación, `data-testid="unpublish-button"`) solo si está publicado.
-- El autoguardado espera 2 s tras el último cambio; si se publicara antes, se publicaría un borrador viejo. Por eso `useAutosaveDraft` (`src/hooks/use-autosave-draft.ts`, modificar) devuelve además `isPending: boolean`: `true` desde que cambia el borrador hasta que termina su guardado (con éxito o con error). `FormEditor` pasa `canPublish = !isPending && status.phase !== "saving" && status.phase !== "invalid"`. El estado inicial (`idle`, sin cambios) permite publicar.
+- El autoguardado espera 2 s tras el último cambio; si se publicara antes, se publicaría un borrador viejo. Por eso `useAutosaveDraft` (`src/hooks/use-autosave-draft.ts`, modificar) devuelve además `isPending: boolean`: `true` desde que cambia el borrador hasta que termina su guardado (con éxito o con error). `FormEditor` pasa `canPublish = !isPending && status.phase !== "saving" && status.phase !== "invalid" && status.phase !== "error"`. Con `phase === "error"` el servidor tiene un borrador viejo y publicar publicaría algo distinto de lo que ve el admin (la versión es inmutable), así que el panel, con `phase === "error"`, muestra bajo el botón (`data-testid="publish-blocked"`) "No se pudo guardar el borrador; reinténtalo antes de publicar". El estado inicial (`idle`, sin cambios) permite publicar. Cubre RF-PUB-01.
 
 ### Cambio en el listado de `form-editor`
 
@@ -384,7 +388,8 @@ Integración (Vitest, requieren PostgreSQL; crean sus propias organizaciones y b
 
 | Fichero | Qué comprueba |
 | --- | --- |
-| `src/server/form-publishing/form-publishing.repository.test.ts` | Aislamiento: con el `organizationId` de B, `findFormForPublishing`, `createVersionAndPublish`, `setUnpublished`, `setAccessMode` y `findVersion` sobre el form de A devuelven `null` y no cambian nada (**CA-PUB-05**); el módulo no exporta función alguna que actualice o borre `FormVersion` (RF-PUB-01); `version` crece 1, 2, 3; conflicto de `@@unique([formId, version])`. |
+| `src/server/form-publishing/form-publishing.repository.test.ts` | Aislamiento: con el `organizationId` de B, `findFormForPublishing`, `createVersionAndPublish`, `setUnpublished`, `setAccessMode` y `findVersion` sobre el form de A devuelven `null` y no cambian nada (**CA-PUB-05**); el módulo no exporta función alguna que actualice o borre `FormVersion` (RF-PUB-01); `version` crece 1, 2, 3; conflicto de `@@unique([formId, version])`; dos `createVersionAndPublish` seguidos con slugs distintos dejan el primero (el segundo lo ignora). |
+| `src/hooks/use-autosave-draft.test.ts` o test del editor | `canPublish` es `false` con `isPending`, `saving`, `invalid` y `error` (**RF-PUB-01**). |
 | `src/server/form-publishing/form-publishing.service.test.ts` | **CA-PUB-01**: publicar v1, cambiar una etiqueta del borrador, publicar v2 -> existe v2 con la etiqueta nueva y `getFormVersion(v1.id)` conserva la etiqueta antigua. **CA-PUB-03**: v2 con un campo obligatorio nuevo; el esquema de v1 no lo contiene y sigue validando con `FormVersionSchema`; una respuesta de ejemplo de v1 sigue pasando `validateSubmission` de form-schema contra v1. **CA-PUB-04**: `getFormForFilling` con modo `registered` sin usuario lanza `UnauthorizedError`, con usuario de otra organización `ForbiddenError`, con usuario de la organización devuelve el formulario; con `public` y sin usuario lo devuelve. **CA-PUB-05**: publicar, despublicar y cambiar modo con el `organizationId` de B lanza `NotFoundError`. **CA-PUB-06**: despublicar -> `getPublishedFormBySlug` devuelve `{state:"closed"}`; republicar conserva el `slug` y da `version` 2. **CA-PUB-07**: borrador sin campos -> `PublishValidationError`, ninguna `FormVersion` creada. Además: el modo por defecto es `registered`; archivar un formulario publicado lo vuelve `closed`; slug desconocido -> `NotFoundError`; cambiar el modo no crea versión; el `slug` no cambia al renombrar ni al republicar. |
 | `src/server/forms/form.repository.test.ts` (modificar) | Etiquetas "Sin publicar", "v<n>" y "Despublicado (última v<n>)". |
 
@@ -392,7 +397,7 @@ Extremo a extremo (Playwright; helpers en `e2e/helpers/form-publishing.ts`: `log
 
 | Fichero | Qué comprueba |
 | --- | --- |
-| `e2e/form-publishing-panel.spec.ts` | `CA-PUB-01`/`CA-PUB-02`: el admin abre el editor, pulsa Publicar, aparece el enlace y el QR (`<img>` con `naturalWidth > 0`); la ruta del QR devuelve `image/png` y `image/svg+xml`; abre `/f/<slug>` y ve `fill-placeholder`. `CA-PUB-06`: despublica, `/f/<slug>` muestra "Este formulario ya no acepta respuestas"; republica, el mismo enlace vuelve a funcionar. `CA-PUB-07`: con un borrador sin campos el panel muestra el mensaje de error y no aparece enlace. |
+| `e2e/form-publishing-panel.spec.ts` | `CA-PUB-01`/`CA-PUB-02`: el admin abre el editor, pulsa Publicar, aparece el enlace y el QR (`<img>` con `naturalWidth > 0`); la ruta del QR devuelve `image/png` y `image/svg+xml`; abre `/f/<slug>` y ve `fill-placeholder`. `CA-PUB-06`: despublica, `/f/<slug>` muestra "Este formulario ya no acepta respuestas"; republica, el mismo enlace vuelve a funcionar. `CA-PUB-07`: con un borrador sin campos el panel muestra el mensaje de error y no aparece enlace. `RF-PUB-01`: si el autoguardado falla (se fuerza con `page.route` devolviendo 500 al guardado), `publish-button` queda deshabilitado y `publish-blocked` muestra "No se pudo guardar el borrador; reinténtalo antes de publicar". |
 | `e2e/form-publishing-api.spec.ts` | `CA-PUB-04`: con `request` sin cookies, `GET /api/public/forms/<slug>` da 401 en modo `registered` y 200 con `schema` en `public`; con la sesión del admin da 200 en `registered`; despublicado da 410; slug inexistente 404. `CA-PUB-05`: el QR de un formulario de otra organización con la sesión del admin demo da 404 (se crea la otra organización con `createOrganization`). |
 
 ## Tareas de desarrollo
@@ -401,4 +406,5 @@ Ver el plan de acción del issue #26 (orden de implementación).
 
 ## Historial de cambios
 
+- 2026-11-26 — Revisión del arquitecto (#26): `canPublish` también bloquea `phase === "error"`; texto del 403 de `/f/[slug]`; slug asignado dentro de la transacción; `runtime = "nodejs"` en el QR y dependencia `qrcode` aprobada.
 - 2026-11-26 — Diseño inicial (#26): `FormVersion`, columnas `slug`, `accessMode` y `publishedVersion` en `Form`, servicio de publicación y contrato de lectura, endpoint público y QR, `PublishPanel`, página `/f/[slug]` mínima y cambio del listado de `form-editor`.

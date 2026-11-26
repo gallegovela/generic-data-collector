@@ -29,6 +29,7 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 - Las respuestas **nunca se migran ni se invalidan** cuando el formulario cambia. Cada respuesta se valida y se muestra con la versión con la que se recogió: si la v2 añade un campo obligatorio, las respuestas de v1 siguen siendo válidas bajo v1.
 - Una respuesta en cola de una versión anterior se valida contra **esa** versión (siempre que sea del mismo formulario), no contra la última.
 - El modo de acceso por defecto es `registered` (la opción segura).
+- **Deuda (tema):** `FormVersionSchema.theme` es opcional y este módulo no lo guarda, así que la apariencia de una versión no queda congelada (se sirve `DEFAULT_THEME`). Cuando se diseñe `theming`, decidirá si cada publicación guarda `theme` en la versión. No bloquea esta pieza.
 
 ## Requisitos funcionales
 
@@ -77,3 +78,4 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — Issue #26 (padre #23): nuevo modo de acceso (RF-PUB-09), regla de rellenado solo si está publicado (RF-PUB-10), publicación solo de borradores válidos (RF-PUB-11), RNF-PUB-01 a 03, CA-PUB-03 a 07; sección "Reglas" (las respuestas nunca se migran); RF-PUB-03 y RF-PUB-08 precisados; RF-PUB-07 aplazado; estado a "requisitos listos".
+- 2026-11-26 — Issue #26, revisión del arquitecto: nota de deuda sobre el tema en "Reglas".
