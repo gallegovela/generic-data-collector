@@ -64,9 +64,10 @@ npm run test:stack:run -- npm run db:seed        # plan «Genérico», organizac
 - **Tipo:** automático (Vitest, Prisma real)
 - **Pasos:**
   ```bash
-  npm run test:stack:run -- npx vitest run src/server/admin-settings/plan.service.test.ts src/lib/admin-settings/plan.schema.test.ts -t "borrado de planes"
+  npm run test:stack:run -- npx vitest run src/server/admin-settings/plan.service.test.ts -t "borrado de planes"
+  npm run test:stack:run -- npx vitest run src/lib/admin-settings
   ```
-- **Resultado esperado:** salida 0 y al menos 3 tests: borrar un plan con organizaciones → `ConflictError`; borrar el último plan → `ConflictError`; borrar un plan libre cuando hay otro → se elimina. (Los tests de validación del esquema —límites 0, negativos o decimales rechazados, `null` aceptado, nombre duplicado → `ConflictError`— se ejecutan además con `npx vitest run src/lib/admin-settings` y deben pasar.)
+- **Resultado esperado:** ambos comandos con salida 0 (los dos son obligatorios). El primero con al menos 3 tests: borrar un plan con organizaciones → `ConflictError`; borrar el último plan → `ConflictError`; borrar un plan libre cuando hay otro → se elimina. El segundo ejecuta los tests de validación del esquema (límites 0, negativos o decimales rechazados, `null` aceptado) y de ventana/secciones, con al menos 1 test ejecutado.
 
 ### PP-SET-05 — Asignación de plan solo a la propia organización
 
@@ -173,3 +174,4 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 ## Historial de cambios
 
 - 2026-11-27 — Plan de pruebas inicial: PP-SET-01 a PP-SET-13 (#40).
+- 2026-11-27 — Revisión del arquitecto: PP-SET-04 separa en dos comandos obligatorios el borrado de planes y los tests de `src/lib/admin-settings` (#40).
