@@ -84,7 +84,7 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 - **CA-PUB-10** — Dado un formulario publicado en `registered` (sin términos), cuando el administrador cambia el modo a `public`, entonces se rechaza hasta publicar de nuevo con términos; dado un formulario `public` cuya versión no tiene términos, entonces su enlace responde como cerrado. (#38)
 - **CA-PUB-11** — Dado un formulario `public` con términos, cuando alguien abre `/f/<slug>` o pide `GET /api/public/forms/<slug>`, entonces recibe los enlaces de términos y de privacidad y el nombre de la organización, y no recibe el id ni el nombre de quien hizo la declaración. (#38)
 
-> La casilla que ve **quien rellena** y la prueba de aceptación que se guarda en la respuesta se especifican en [field-collector](../field-collector/README.md) (RF-COL-21, RF-COL-22) y [submissions-dashboard](../submissions-dashboard/README.md) (RF-SUB-13); sus criterios (CA-COL-11, CA-COL-12, CA-SUB-15) se ejecutan en el plan de pruebas de este módulo, porque el recorrido cruza los tres.
+> La prueba de aceptación que se guarda en la respuesta se especifica en [submissions-dashboard](../submissions-dashboard/README.md) (RF-SUB-13, CA-SUB-15). **La casilla que ve quien rellena (`/f/<slug>`, `FillForm`, `submitFill`) queda fuera de #38**: depende de #33 y la tratará una pieza posterior de `field-collector` (ver "Restricción" en [design.md](design.md#términos-y-condiciones-en-formularios-públicos-38)). Mientras no exista, un formulario `public` solo se puede publicar con términos, pero la pantalla de relleno no los muestra todavía.
 
 ## Historial de cambios
 

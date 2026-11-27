@@ -402,7 +402,7 @@ Extremo a extremo (Playwright; helpers en `e2e/helpers/form-publishing.ts`: `log
 
 ## Términos y condiciones en formularios públicos (#38)
 
-Añade la aceptación obligatoria de términos y condiciones a los formularios `public`. Cubre RF-PUB-12 a RF-PUB-15, RNF-PUB-04, CA-PUB-08 a CA-PUB-11 y, de otros módulos, RF-COL-21, RF-COL-22, RF-SUB-13, RF-GDPR-06 y RF-GDPR-07. **Depende de #33** (pantalla de relleno y `submitFill`, aún no fusionados cuando se escribe este diseño): el desarrollo parte de una rama que ya los contenga.
+Añade la aceptación obligatoria de términos y condiciones a los formularios `public`. Cubre RF-PUB-12 a RF-PUB-15, RNF-PUB-04, CA-PUB-08 a CA-PUB-11 y, de otros módulos, RF-SUB-13, RF-GDPR-06 a RF-GDPR-08. **No depende de #33**: se desarrolla desde la rama principal. La casilla de la pantalla de relleno queda fuera (ver "Lado de quien rellena: fuera de #38").
 
 ### Decisiones
 
@@ -411,7 +411,7 @@ Añade la aceptación obligatoria de términos y condiciones a los formularios `
 3. **Dos aceptaciones distintas.** (a) El **administrador** declara al publicar (guardada en la versión: `declaredByUserId`, `declaredAt`); (b) la **persona que rellena** marca la casilla (guardada en cada `Submission`). Ver pregunta 2 sobre la interpretación de "casilla que tendrá que rellenar la empresa cliente".
 4. **Sin términos no se publica en `public`**, y un `public` ya publicado sin términos queda cerrado (RF-PUB-14) hasta republicar. Es la opción segura y no requiere cambios en #33: reutiliza el estado `closed` (410).
 5. **`accessMode` sigue sin crear versión**, pero `registered → public` solo se permite si la versión publicada ya lleva términos; si no, hay que "Publicar cambios" con ellos.
-6. La casilla y los avisos de la pantalla de relleno se definen aquí porque el recorrido cruza tres módulos; los criterios del lado de relleno (CA-COL-11, CA-COL-12) y de la respuesta (CA-SUB-15) se ejecutan en el plan de este módulo.
+6. La casilla de la pantalla de relleno se difiere a una pieza de `field-collector` posterior a #33 (revisión del arquitecto); #38 solo deja listos los datos que necesita.
 
 ### Modelo de datos (migración `add_consent_terms`)
 
@@ -443,8 +443,6 @@ Migración solo `ALTER TABLE form_versions ADD COLUMN consent JSONB` y `ALTER TA
 | Entrada | `src/app/api/public/forms/[slug]/route.ts` (modificar) | Añade `consent` y `organizationName` al JSON. |
 | Interfaz | `src/components/form-publishing/publish-panel.tsx` (modificar) | Campos de términos y declaración. |
 | Interfaz | `src/components/form-publishing/consent-fields.tsx` (nuevo) | Subcomponente de esos campos. |
-| Relleno | `src/components/field-collector/consent-checkbox.tsx` (nuevo), `fill-form.tsx` (modificar, de #33) | Casilla, enlaces y aviso del encargado. |
-| Relleno | `src/lib/field-collector/fill.schema.ts`, `src/lib/field-collector/submit.ts`, `src/server/field-collector/fill.service.ts` (modificar, de #33) | `acceptedTerms` y comprobación en servidor. |
 | Respuestas | `src/lib/submissions-dashboard/create-submission.schema.ts`, `src/server/submissions/submission.service.ts`, `submission.repository.ts` (modificar) | Guardan `consent`. |
 | Respuestas | `src/components/submissions-dashboard/submission-consent.tsx` (nuevo), `submission-detail.tsx` (modificar) | Muestra la prueba en la ficha. |
 | Pruebas | `e2e/helpers/form-publishing.ts` (modificar) | `publishViaService(formId, accessMode)` pasa `TEST_CONSENT_INPUT` si el modo es `public`. |
@@ -556,24 +554,15 @@ Cambios de comportamiento del servicio:
 - Selección `registered → public` en un formulario ya publicado: si `state.consent` es `null` solo cambia la selección local y se muestra "Para hacerlo público, publica de nuevo con los términos y condiciones" (no se llama a `setAccessModeAction`); si no es `null`, se llama como hasta ahora. Pasar a `registered` siempre llama a la acción.
 - `publishFormAction(formId, { accessMode, consent })` recibe los tres datos en `public`.
 
-### Lado de quien rellena (cambios sobre #33)
+### Lado de quien rellena: fuera de #38
 
-Se detalla aquí para que el desarrollador no tome decisiones de diseño; los requisitos están en `field-collector`.
+La casilla de la pantalla de relleno (`consent-checkbox.tsx`, `fill-form.tsx`, `acceptedTerms` en el cuerpo de guardado, la comprobación en `submitFill`, RF-COL-21, RF-COL-22, CA-COL-11, CA-COL-12 y CA-GDPR-03) **no se desarrolla en #38**: depende de #33 (`/f/<slug>`, `FillForm`, `submitFill`), aún sin fusionar. Pasa a una pieza de `field-collector` posterior a #33 (`Depende de: #33` y `#38`). #38 deja listo lo que esa pieza necesita: `GET /api/public/forms/[slug]` y `getPublishedFormBySlug` devuelven `consent` y `organizationName`, y `createSubmission` acepta y guarda `consent`.
 
-- `page.tsx` de `/f/[slug]` pasa `form.consent` y `form.organizationName` a `FillForm`.
-- `ConsentCheckbox({ consent, organizationName, checked, onChange, error })` (`consent-checkbox.tsx`), solo cuando `consent !== null`:
-  - Casilla `data-testid="consent-checkbox"`, con texto "He leído y acepto los términos y condiciones y la política de privacidad", donde "términos y condiciones" y "política de privacidad" son enlaces `data-testid="terms-link"` y `data-testid="privacy-link"` (`target="_blank"`, `rel="noopener noreferrer"`).
-  - Aviso `data-testid="processor-notice"`: "Este formulario lo ofrece {organizationName}, responsable del tratamiento de tus datos. FormIA actúa como encargado del tratamiento."
-  - Error `data-testid="consent-error"`: "Debes aceptar los términos y condiciones para enviar."
-- `FillForm`: estado `acceptedTerms` (por defecto `false`; no forma parte de `answers`). Guardar con `consent !== null` y `!acceptedTerms` → muestra `consent-error`, enfoca la casilla y no llama a la red. `hasAnyAnswer` **no** cuenta la casilla (Descartar sin respuestas no pide confirmación solo por haberla marcado).
-- `submit(ctx, clientId, answers, files)` añade `acceptedTerms` en el cuerpo (`ctx.acceptedTerms: boolean`). `fillSubmissionBodySchema` gana `acceptedTerms: z.boolean().optional()`.
-- `submitFill`, tras el paso 2 (`getFormVersion`) y antes de llamar a `createSubmission`:
-  1. Si `form.accessMode === "public"`: la versión pedida (`version.consent`) tiene que existir; si no (versión anterior sin términos) → `ValidationError("Esta versión del formulario ya no está disponible. Vuelve a abrirlo.")` (400).
-  2. Si además `body.acceptedTerms !== true` → `SubmissionValidationError([{ fieldId: "_consent", message: "Debes aceptar los términos y condiciones para enviar." }])` (400 con `fieldErrors`).
-  3. Se pasa a `createSubmission` `consent: { termsUrl, privacyUrl, formVersionNumber: version.version }` (los de **la versión pedida**, nunca los del cuerpo).
-  4. En modo `registered` no se exige ni se guarda nada (`consent` indefinido).
-- La limitación de tasa y el honeypot de #33 se aplican antes, sin cambios. El honeypot lleno sigue devolviendo "éxito" sin guardar.
-- Registro (logs): nada nuevo; no se registran enlaces ni IP.
+**Restricción mientras esa pieza no exista.** La pantalla de relleno de #33 no muestra términos ni casilla ni envía `acceptedTerms`. Por eso:
+
+- #38 no toca `field-collector` ni `/f/[slug]`; el marcador `fill-placeholder` actual y las pruebas de #26 siguen igual.
+- RF-PUB-14 sigue siendo la protección: un `public` sin términos se sirve como cerrado (410), con o sin casilla en pantalla. Un `public` con términos se sirve, pero hasta que exista la pieza de `field-collector` no se registra ninguna prueba de aceptación de quien rellena (`Submission.consent` queda `null` si la pantalla de relleno no lo envía). No debe usarse con clientes reales hasta entonces; en el piloto no los hay.
+- Es la misma limitación de "cierre 410" ya descrita para los públicos sin términos (RF-PUB-14); quien desarrolle la pieza de `field-collector` debe exigir `acceptedTerms === true` en servidor y pasar a `createSubmission` los enlaces de la versión guardada, nunca los del cuerpo.
 
 ### Casilla del administrador y contrato de encargo
 
@@ -586,8 +575,6 @@ El texto de la declaración está en el panel y la declaración queda en `FormVe
 | Publicar `public` sin términos, enlace inválido o sin declaración | `PublishValidationError` (`issues` con `consent.*`) | `{ ok:false, error, issues }` | — |
 | `registered → public` sin términos en la versión | `ValidationError` | `{ ok:false, error }` | — |
 | Formulario `public` sin términos en la versión publicada | `{ state: "closed" }` | — | 410 |
-| Guardar en `public` sin `acceptedTerms: true` | `SubmissionValidationError` (`fieldId "_consent"`) | — | 400 |
-| Guardar en `public` con una versión sin términos | `ValidationError` | — | 400 |
 
 ### Seguridad y privacidad
 
@@ -610,10 +597,9 @@ Nombre de cada test: incluye el identificador del criterio.
 | CA-PUB-11 | Vitest (integración) | idem — `describe("CA-PUB-11")`: `getPublishedFormBySlug` en `public` devuelve `consent` con los dos enlaces y `organizationName`, sin `declaredByUserId`; en `registered`, `consent` es `null`. |
 | CA-PUB-08, CA-PUB-11 | Playwright | `e2e/form-publishing-consent.spec.ts` — el panel: con "Público con enlace" aparecen `consent-fields`; publicar con la declaración sin marcar muestra error; con datos válidos aparece el enlace; `GET /api/public/forms/<slug>` sin cookies trae `consent` y `organizationName` y no contiene `declaredBy`. |
 | CA-PUB-10 | Playwright | idem — formulario publicado en `registered`: elegir "Público con enlace" muestra el aviso y **no** cambia el modo en el servidor hasta publicar con términos. |
-| CA-COL-11 | Playwright | `e2e/field-collector-consent.spec.ts` — formulario `public` con términos (`publishViaService`): anónimo sin cookies abre `/f/<slug>`, rellena un campo de texto, pulsa Guardar sin marcar `consent-checkbox` → aparece `consent-error` y no hay `Submission` (consulta por servicio); marca la casilla y guarda → `save-success`/`/thanks` y existe 1 `Submission` con `consent` no nulo. En un formulario `registered` con sesión no existe `consent-checkbox`. |
-| CA-GDPR-03 | Playwright | idem — en `/f/<slug>` público, `processor-notice` contiene el nombre de la organización y "FormIA actúa como encargado del tratamiento"; `terms-link` y `privacy-link` tienen el `href` configurado, `target="_blank"` y `rel` con `noopener`. |
-| CA-COL-12 | Vitest (integración) | `src/server/field-collector/fill.service.test.ts` — `describe("CA-COL-12")`: `submitFill` en `public` sin `acceptedTerms` o con `false` → `SubmissionValidationError` con `fieldId "_consent"` y 0 filas; con una versión sin términos → `ValidationError`; con `true` → fila con `consent` cuyos enlaces son los de la versión del servidor aunque el cuerpo traiga otros campos; en `registered` no se exige y `consent` es `null`. |
-| CA-COL-12 | Playwright | idem (`e2e/field-collector-consent.spec.ts`) — `POST /api/public/forms/<slug>/submissions` sin cookies y sin `acceptedTerms` responde 400 y no crea fila; con `acceptedTerms: true` responde 201. |
+Los criterios de la respuesta (CA-SUB-15) se prueban en `submissions-dashboard` (ver su `design.md`), sobre el servicio `createSubmission`, sin pantalla de relleno.
+
+**Nombre de los `describe`.** Cada bloque de pruebas por criterio se llama exactamente `describe("CA-PUB-08", …)`, `describe("CA-PUB-09", …)`, `describe("CA-PUB-10", …)`, `describe("CA-PUB-11", …)` (y `describe("CA-SUB-15", …)` en respuestas); en Playwright, `test.describe("CA-PUB-08 ...", …)` con el identificador al principio del título. Así `vitest -t "CA-PUB-08"` y `playwright -g "CA-PUB-08"` seleccionan solo ese criterio. Un caso del plan de pruebas ejecuta un `-t` por identificador (varias invocaciones, o una alternancia `-t "CA-PUB-10|CA-PUB-09"`, que es una expresión regular).
 
 Los tests de #26 que publican en `public` pasan a usar `TEST_CONSENT_INPUT` (el desarrollador los actualiza; no cambian de intención).
 
@@ -623,6 +609,7 @@ Ver el plan de acción del issue #26 (orden de implementación) y, para los tér
 
 ## Historial de cambios
 
-- 2026-11-27 — Issue #38: sección "Términos y condiciones en formularios públicos" (`FormVersion.consent`, `Submission.consent`, validación, panel, lado de relleno, errores, tests).
+- 2026-11-27 — Issue #38: sección "Términos y condiciones en formularios públicos" (`FormVersion.consent`, `Submission.consent`, validación, panel, errores, tests).
+- 2026-11-27 — Issue #38, revisión del arquitecto: la casilla de la pantalla de relleno (depende de #33) sale de #38; restricción documentada; convención de nombres de `describe`.
 - 2026-11-26 — Revisión del arquitecto (#26): `canPublish` también bloquea `phase === "error"`; texto del 403 de `/f/[slug]`; slug asignado dentro de la transacción; `runtime = "nodejs"` en el QR y dependencia `qrcode` aprobada.
 - 2026-11-26 — Diseño inicial (#26): `FormVersion`, columnas `slug`, `accessMode` y `publishedVersion` en `Form`, servicio de publicación y contrato de lectura, endpoint público y QR, `PublishPanel`, página `/f/[slug]` mínima y cambio del listado de `form-editor`.

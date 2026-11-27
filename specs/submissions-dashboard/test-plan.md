@@ -253,9 +253,9 @@ npm run db:migrate
   ```bash
   npm run test:stack:run -- npx vitest run src/server/submissions/submission.service.test.ts -t "CA-SUB-15"
   npm run test:stack:run -- npx playwright test e2e/submissions-dashboard-detail.spec.ts -g "CA-SUB-15"
-  npm run test:stack:run -- sh -c "psql \"\$DATABASE_URL\" -c '\\d submissions' | grep consent"
+  npm run test:stack:run -- sh -c "npx prisma db pull --print | grep -E 'consent +Json\\?'"
   ```
-- **Resultado esperado:** los tres con código de salida 0 y al menos 1 test en los dos primeros. Con `consent` en la entrada se guarda con `acceptedAt` puesto por el servidor; sin él queda `null`; un reenvío con el mismo `clientId` no cambia `acceptedAt`; la ficha de una respuesta con `consent` muestra `submission-consent` con la fecha, la versión y los enlaces `terms-link` y `privacy-link`, y la de una sin él no muestra el bloque; la columna `consent` de `submissions` existe y es `jsonb` nulable (⏭️ con motivo si `psql` no está disponible).
+- **Resultado esperado:** los tres con código de salida 0 y al menos 1 test en los dos primeros. Con `consent` en la entrada se guarda con `acceptedAt` puesto por el servidor; sin él queda `null`; un reenvío con el mismo `clientId` no cambia `acceptedAt`; la ficha de una respuesta con `consent` muestra `submission-consent` con la fecha, la versión y los enlaces `terms-link` y `privacy-link`, y la de una sin él no muestra el bloque; la introspección con Prisma muestra `consent Json?` (dos líneas: `FormVersion` y `Submission`; no hace falta `psql`).
 
 ## Comprobaciones manuales
 

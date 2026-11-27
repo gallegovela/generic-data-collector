@@ -18,8 +18,8 @@
 
 | Obligación | Cómo se cumple | Requisito |
 | --- | --- | --- |
-| Informar a quien rellena | `/f/<slug>` en modo `public` muestra el responsable (nombre de la organización), la mención de FormIA como encargado y los enlaces a los términos y la privacidad del responsable. | RF-GDPR-06, RF-COL-21 |
-| Obtener y poder probar la aceptación | Casilla obligatoria al guardar; se guarda fecha del servidor, enlaces y versión en `Submission.consent`. | RF-COL-21, RF-COL-22, RF-SUB-13 |
+| Informar a quien rellena | `/f/<slug>` en modo `public` muestra el responsable (nombre de la organización), la mención de FormIA como encargado y los enlaces a los términos y la privacidad del responsable. | RF-GDPR-06 (la pantalla de relleno es una pieza posterior de `field-collector`, tras #33; #38 expone los datos) |
+| Obtener y poder probar la aceptación | Casilla obligatoria al guardar (pieza posterior de `field-collector`); se guarda fecha del servidor, enlaces y versión en `Submission.consent` (#38 deja listo el almacenamiento). | RF-SUB-13 |
 | El responsable asume su papel | El administrador declara al publicar (casilla) y queda registrado quién y cuándo en `FormVersion.consent`. | RF-GDPR-07, RF-PUB-12, RF-PUB-13 |
 | Contrato de encargo | Texto a redactar por una persona con formación legal (ver "Pendiente"). La declaración del administrador hace referencia a él. | RF-GDPR-07 |
 | Alojamiento en la UE, logs sin datos personales, archivos privados | Reglas transversales del README. | RNF-GDPR-01 a RNF-GDPR-03 |

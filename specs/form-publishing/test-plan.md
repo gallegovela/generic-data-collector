@@ -168,56 +168,22 @@ npm run test:stack:run -- npm run db:seed        # usuario admin y organización
   ```
 - **Resultado esperado:** ambos con código de salida 0. `GET http://web:3000/api/public/forms/<slug>` sin cookies en un formulario `public` devuelve 200 con `consent.termsUrl`, `consent.privacyUrl` y `organizationName`, y el cuerpo no contiene `declaredBy` ni `organizationId`; en `registered` (con sesión) `consent` es `null`.
 
-### PP-PUB-13 — Casilla obligatoria en la pantalla de relleno (#38)
-
-- **Cubre:** CA-COL-11, RF-COL-21
-- **Tipo:** automático (Playwright)
-- **Precondiciones:** seed aplicado; rama con #33 integrada (pantalla de relleno).
-- **Pasos:**
-  ```bash
-  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-COL-11"
-  ```
-- **Resultado esperado:** código de salida 0 y al menos 1 test. Sin marcar la casilla, Guardar muestra `consent-error` y no se crea ninguna `Submission`; marcada, se guarda y la `Submission` tiene `consent` no nulo; en un formulario `registered` no hay `consent-checkbox`.
-
-### PP-PUB-14 — Aviso del responsable y enlaces en el formulario público (#38)
-
-- **Cubre:** CA-GDPR-03, RF-GDPR-06
-- **Tipo:** automático (Playwright)
-- **Precondiciones:** igual que PP-PUB-13.
-- **Pasos:**
-  ```bash
-  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-GDPR-03"
-  ```
-- **Resultado esperado:** código de salida 0 y al menos 1 test. `processor-notice` contiene el nombre de la organización y «FormIA actúa como encargado del tratamiento»; `terms-link` y `privacy-link` tienen los `href` configurados, `target="_blank"` y `rel` que incluye `noopener`.
-
-### PP-PUB-15 — El servidor exige la aceptación aunque se salte la interfaz (#38)
-
-- **Cubre:** CA-COL-12, RF-COL-22
-- **Tipo:** automático (Vitest con PostgreSQL + Playwright con peticiones HTTP)
-- **Precondiciones:** igual que PP-PUB-13.
-- **Pasos:**
-  ```bash
-  npm run test:stack:run -- npx vitest run src/server/field-collector/fill.service.test.ts -t "CA-COL-12"
-  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-COL-12"
-  ```
-- **Resultado esperado:** ambos con código de salida 0 y al menos 1 test cada uno. En `public`, el guardado sin `acceptedTerms: true` responde 400 (`fieldErrors` con `_consent`) y no crea fila; con una versión sin términos responde 400; con `true` responde 201 y la fila guarda los enlaces de la versión del servidor; en `registered` no se exige.
-
-### PP-PUB-16 — La migración de términos es compatible con los datos existentes (#38)
+### PP-PUB-13 — La migración de términos es compatible con los datos existentes (#38)
 
 - **Cubre:** RF-PUB-13, RF-SUB-13 (compatibilidad)
 - **Tipo:** comando
-- **Precondiciones:** Preparación ejecutada.
+- **Precondiciones:** Preparación ejecutada. No requiere `psql`: se comprueba con Prisma.
 - **Pasos:**
   ```bash
   npm run test:stack:run -- npx prisma migrate status
-  npm run test:stack:run -- sh -c "psql \"\$DATABASE_URL\" -c '\\d form_versions' -c '\\d submissions' | grep -E 'consent'"
+  npm run test:stack:run -- sh -c "npx prisma db pull --print | grep -E 'consent +Json\\?'"
   ```
-- **Resultado esperado:** `migrate status` termina con código 0 e informa "Database schema is up to date"; el `grep` muestra dos líneas `consent | jsonb` sin `not null`. (Si `psql` no está disponible en el contenedor, el ejecutor lo anota como ⏭️ y comprueba lo mismo con `npx prisma db pull --print`.)
+- **Resultado esperado:** `migrate status` termina con código 0 e informa "Database schema is up to date"; el segundo comando (introspección de la base real, `--print` no escribe nada) termina con código 0 y muestra exactamente dos líneas `consent Json?` (una en `FormVersion` y otra en `Submission`), ambas con `?` (nulables). Si muestra menos de dos, es ❌.
 
 ## Comprobaciones manuales
 
-- [ ] El bloque de términos del panel de publicar y la casilla con el aviso del responsable se ven ordenados en móvil (360 px) y en ordenador; los enlaces se distinguen y se pueden tocar con una mano. — Cubre: RF-COL-21, RF-PUB-12
-- [ ] Revisar con una persona con formación legal el texto de la declaración del administrador y el aviso del responsable (no es asesoramiento jurídico). — Cubre: RF-GDPR-06, RF-GDPR-07
+- [ ] El bloque de términos del panel de publicar (campos de enlace y declaración) se ve ordenado en móvil (360 px) y en ordenador; los enlaces se distinguen y se pueden tocar con una mano. — Cubre: RF-PUB-12
+- [ ] Revisar con una persona con formación legal el texto de la declaración del administrador y `specs/privacy-gdpr/processor-role.md` (no es asesoramiento jurídico; el contrato de encargo sigue pendiente). — Cubre: RF-GDPR-06, RF-GDPR-07
 - [ ] Escanear con un móvil real el QR descargado (PNG y SVG) y comprobar que abre el formulario. — Cubre: CA-PUB-02
 - [ ] El panel de publicar se ve ordenado en pantalla de ordenador y no rompe la barra superior del editor en una ventana estrecha. — Cubre: RF-PUB-05, RF-PUB-09
 - [ ] "Copiar enlace" copia al portapapeles el enlace mostrado. — Cubre: RF-PUB-04
@@ -231,4 +197,5 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 ## Historial de cambios
 
 - 2026-11-26 — Plan de pruebas inicial (#26)
-- 2026-11-27 — #38: PP-PUB-10 a PP-PUB-16 (términos obligatorios, versión, lectura, casilla en la pantalla de relleno, aviso del responsable, exigencia en servidor y migración) y dos comprobaciones manuales.
+- 2026-11-27 — #38: PP-PUB-10 a PP-PUB-13 (términos obligatorios, versión, lectura y migración) y dos comprobaciones manuales.
+- 2026-11-27 — #38, revisión del arquitecto: fuera los casos de la pantalla de relleno (dependen de #33; irán con la pieza de `field-collector`); la migración se comprueba con `prisma db pull --print`, sin `psql`; los `-t` coinciden con los `describe` de `design.md`.

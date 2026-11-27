@@ -67,18 +67,6 @@ sequenceDiagram
   end
 ```
 
-## Aceptación de términos y condiciones (#38)
-
-Requisitos de la pantalla de relleno de los formularios `public`. Diseño en [form-publishing](../form-publishing/design.md#términos-y-condiciones-en-formularios-públicos-38). Dependen de la pantalla de relleno de #33 (RF-COL-15 a RF-COL-20, CA-COL-04 a CA-COL-10); los números RF-COL-21 y siguientes dejan sitio a esos.
-
-| ID | Prioridad | Requisito |
-| --- | --- | --- |
-| RF-COL-21 | Must | En un formulario `public`, `/f/<slug>` muestra, antes de Guardar, una casilla **no marcada por defecto** «He leído y acepto los términos y condiciones y la política de privacidad», con enlaces a ambos textos (los de la versión publicada), y un aviso con el nombre de la organización responsable del tratamiento y la mención de que FormIA actúa como encargado. Guardar sin marcarla muestra el error junto a la casilla y no envía nada. En modo `registered` no aparece. |
-| RF-COL-22 | Must | El servidor exige la aceptación al guardar en modo `public` (no basta con la interfaz): sin `acceptedTerms: true`, o con una versión del formulario sin términos, rechaza con 400 y no guarda. Los enlaces y la versión que se registran son los de la versión del formulario guardada en el servidor, no los que envía el cliente. |
-
-- **CA-COL-11** — Dado un formulario `public` con términos, cuando una persona anónima rellena los campos y pulsa Guardar sin marcar la casilla, entonces ve el error junto a la casilla y no se crea ninguna `Submission`; al marcarla y guardar, se crea. En un formulario `registered` no hay casilla.
-- **CA-COL-12** — Dado un formulario `public`, cuando alguien envía directamente la petición de guardado sin `acceptedTerms: true`, entonces recibe 400 y no se guarda nada; con `acceptedTerms: true` se guarda la prueba de aceptación con los enlaces de la versión del servidor.
-
 ## Dependencias
 
 - Depende de: form-schema, theming, form-publishing, file-storage, tenancy-auth.
@@ -97,4 +85,3 @@ Requisitos de la pantalla de relleno de los formularios `public`. Diseño en [fo
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
-- 2026-11-27 — Issue #38: sección «Aceptación de términos y condiciones» (RF-COL-21, RF-COL-22, CA-COL-11, CA-COL-12).

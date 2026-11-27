@@ -51,7 +51,7 @@ Reunir las reglas de protección de datos que aplican de forma transversal a tod
 
 - **CA-GDPR-01** — Dada una organización con respuestas y fotos, cuando se ejecuta el script de borrado, entonces no queda ninguna fila ni archivo con su `organizationId`.
 - **CA-GDPR-02** — Dada una respuesta recibida, cuando se revisan los logs del servidor, entonces no aparece ningún valor de la respuesta.
-- **CA-GDPR-03** — Dado un formulario `public` publicado con términos, cuando una persona anónima abre `/f/<slug>`, entonces ve el nombre de la organización como responsable, la mención de FormIA como encargado y los enlaces a los términos y la privacidad. (#38; se ejecuta en el plan de `form-publishing`, PP-PUB-14)
+- **CA-GDPR-03** — Dado un formulario `public` publicado con términos, cuando una persona anónima abre `/f/<slug>`, entonces ve el nombre de la organización como responsable, la mención de FormIA como encargado y los enlaces a los términos y la privacidad. (#38; **diferido**: depende de la pantalla de relleno de #33, se desarrolla y se prueba en la pieza posterior de `field-collector`; #38 solo deja disponibles `consent` y `organizationName` en la lectura, CA-PUB-11)
 - **CA-GDPR-04** — Dada una respuesta con prueba de aceptación, cuando se borra la respuesta, entonces desaparece también su `consent` (está en la misma fila); y la declaración del administrador solo existe en `FormVersion.consent`, que se borra con la organización. (#38; el borrado de respuesta y de organización se verifican cuando existan RF-GDPR-02 y RF-GDPR-03; hoy solo se comprueba que `consent` es una columna de `Submission`, PP-SUB-20)
 
 ## Historial de cambios
