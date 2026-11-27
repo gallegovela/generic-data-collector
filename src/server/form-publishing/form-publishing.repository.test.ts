@@ -129,4 +129,24 @@ describe("form-publishing.repository", () => {
     const found = await findFormForPublishing(orgA.id, form.id);
     expect(found).toMatchObject({ status: "draft", slug: null, accessMode: "registered", publishedVersion: null });
   });
+
+  // Cubre: RF-COL-01
+  it("RF-COL-01: listPublishedForms solo devuelve los publicados de la organización", async () => {
+    const pub = await createForm(orgA.id, { name: "Listado pub", draft: { title: "L", fields: [] } });
+    const slug = rndSlug();
+    await createVersionAndPublish(orgA.id, pub.id, { schema, accessMode: "registered", slug, userId: "u" });
+    const other = await createForm(orgB.id, { name: "Listado B", draft: { title: "L", fields: [] } });
+    await createVersionAndPublish(orgB.id, other.id, {
+      schema,
+      accessMode: "registered",
+      slug: rndSlug(),
+      userId: "u",
+    });
+    await createForm(orgA.id, { name: "Listado borrador", draft: { title: "L", fields: [] } });
+
+    const list = await repository.listPublishedForms(orgA.id);
+    expect(list.map((f) => f.slug)).toContain(slug);
+    expect(list.map((f) => f.id)).not.toContain(other.id);
+    expect(list.every((f) => f.name !== "Listado borrador")).toBe(true);
+  });
 });

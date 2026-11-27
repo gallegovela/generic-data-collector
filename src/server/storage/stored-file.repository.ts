@@ -55,14 +55,22 @@ export async function createIfAbsent(
   }
 }
 
-/** Marca los archivos como parte de una respuesta. Devuelve cuántos actualizó (solo de esa organización). */
+/**
+ * Marca los archivos como parte de una respuesta. Devuelve cuántos actualizó
+ * (solo de esa organización). Un archivo ya enlazado a otra respuesta nunca se
+ * reasigna (RF-COL-18); si ya es de esta misma, no cambia nada.
+ */
 export async function linkToSubmission(
   organizationId: string,
   keys: string[],
   submissionId: string,
 ): Promise<number> {
   const result = await prisma.storedFile.updateMany({
-    where: { organizationId, key: { in: keys } },
+    where: {
+      organizationId,
+      key: { in: keys },
+      OR: [{ submissionId: null }, { submissionId }],
+    },
     data: { submissionId },
   });
   return result.count;

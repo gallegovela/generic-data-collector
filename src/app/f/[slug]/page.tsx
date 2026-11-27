@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { FillForm } from "@/components/field-collector/fill-form";
 import { ForbiddenError, NotFoundError, UnauthorizedError } from "@/lib/errors";
 import { getCurrentUser } from "@/server/auth/session";
 import {
@@ -19,17 +20,18 @@ function Message({ children, testId }: { children: string; testId?: string }) {
 }
 
 /**
- * Enlace estable de un formulario publicado. El relleno real lo aporta
- * `field-collector`; aquí hay un marcador.
+ * Enlace estable de un formulario publicado: pantalla de relleno.
  *
- * Cubre: RF-PUB-04, RF-PUB-06, RF-PUB-10, CA-PUB-02, CA-PUB-04, CA-PUB-06
+ * Cubre: RF-PUB-04, RF-PUB-06, RF-PUB-10, CA-PUB-02, CA-PUB-04, CA-PUB-06,
+ * RF-COL-01, RF-COL-17
  */
 export default async function FillFormPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const user = await getCurrentUser();
 
   let lookup: FormLookup;
   try {
-    lookup = await getFormForFilling(slug, await getCurrentUser());
+    lookup = await getFormForFilling(slug, user);
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     if (error instanceof UnauthorizedError) redirect("/login");
@@ -48,13 +50,14 @@ export default async function FillFormPage({ params }: { params: Promise<{ slug:
     return <Message testId="form-closed">Este formulario ya no acepta respuestas</Message>;
   }
 
+  const { form } = lookup;
   return (
-    <main className="mx-auto max-w-md p-6 text-center">
-      <h1 className="text-2xl font-semibold">{lookup.form.schema.title}</h1>
-      {/* TODO(field-collector): sustituir este marcador por la pantalla de relleno */}
-      <p data-testid="fill-placeholder" className="mt-4 text-muted-foreground">
-        Rellenado disponible próximamente
-      </p>
-    </main>
+    <FillForm
+      slug={slug}
+      // Sin organizationId: el cliente no lo necesita ni debe conocerlo.
+      form={{ versionId: form.versionId, schema: form.schema, theme: form.theme }}
+      mode={user ? "user" : "anonymous"}
+      exitPath={user?.role === "admin" ? "/admin/forms" : "/collect"}
+    />
   );
 }
