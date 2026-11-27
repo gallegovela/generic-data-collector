@@ -300,7 +300,7 @@ export async function setAccessModeAction(formId: string, input: SetAccessModeIn
 | `GET /api/public/forms/[slug]` | Cualquiera (sesión opcional: `getCurrentUser()`) | **200** `PublishedFormView` en JSON (sin `organizationId`: solo `formId`, `name`, `slug`, `accessMode`, `versionId`, `version`, `schema`, `theme`). **401** `{ error: "login-required" }` (modo `registered` sin sesión). **403** `{ error: "forbidden" }` (sesión de otra organización). **404** `{ error: "not-found" }` (slug desconocido o formato inválido). **410** `{ error: "closed", message: "Este formulario ya no acepta respuestas." }` (despublicado o archivado). Cabecera `Cache-Control: no-store`. |
 | `GET /api/forms/[id]/qr?format=png\|svg&download=1` | Admin (`requireSession({role:"admin"})`) | **200** imagen (`image/png` o `image/svg+xml`); con `download=1`, `Content-Disposition: attachment; filename="<slug>.png"` (o `.svg`). **400** parámetros inválidos. **401/403** sin sesión / no admin. **404** formulario de otra organización, sin `slug` o no publicado. |
 
-`/api/**` y `/f/**` quedan fuera del `matcher` del middleware (solo guarda `/admin` y `/collect`), así que la autenticación de estas rutas es la que hace cada handler.
+`/api/**` y `/f/**` quedan fuera del `matcher` del middleware (solo guarda `/admin` y `/forms`), así que la autenticación de estas rutas es la que hace cada handler.
 
 El route handler del QR declara `export const runtime = "nodejs"` (la librería `qrcode` no es compatible con edge). Dependencia nueva aprobada: `qrcode` y `@types/qrcode`, con la versión fijada en `package.json`; comprobar que el build de Next.js pasa.
 
@@ -405,6 +405,8 @@ Extremo a extremo (Playwright; helpers en `e2e/helpers/form-publishing.ts`: `log
 Ver el plan de acción del issue #26 (orden de implementación).
 
 ## Historial de cambios
+
+- 2026-11-27 — Solo texto (#39): el middleware guarda `/admin` y `/forms` (antes `/collect`, retirada). `listPublishedForms` se añade a este repositorio (ver tenancy-auth/design.md).
 
 - 2026-11-26 — Revisión del arquitecto (#26): `canPublish` también bloquea `phase === "error"`; texto del 403 de `/f/[slug]`; slug asignado dentro de la transacción; `runtime = "nodejs"` en el QR y dependencia `qrcode` aprobada.
 - 2026-11-26 — Diseño inicial (#26): `FormVersion`, columnas `slug`, `accessMode` y `publishedVersion` en `Form`, servicio de publicación y contrato de lectura, endpoint público y QR, `PublishPanel`, página `/f/[slug]` mínima y cambio del listado de `form-editor`.

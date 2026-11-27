@@ -3,7 +3,7 @@
 - **Requisitos:** [README.md](README.md)
 - **Diseño:** [design.md](design.md)
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
-- **Issues:** #4 (diseño), #20 (límite de login y trazabilidad)
+- **Issues:** #4 (diseño), #20 (límite de login y trazabilidad), #39 (retirar `/collect`)
 
 Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-4` de la pull request y **antes de fusionarla**.
 
@@ -116,7 +116,7 @@ npm run db:seed
   ```bash
   npx playwright test e2e/auth-admin-guard.spec.ts
   ```
-- **Resultado esperado:** código de salida 0; con sesión del `collector` del seed (`collector@demo.formia.local` / `Demo1234!`), `page.goto("/admin")` termina en `/collect`; con sesión del admin del seed (`admin@demo.formia.local` / `Demo1234!`), `/admin` responde 200.
+- **Resultado esperado:** código de salida 0; con sesión del `collector` del seed (`collector@demo.formia.local` / `Demo1234!`), `page.goto("/admin")` termina en `/forms`; con sesión del admin del seed (`admin@demo.formia.local` / `Demo1234!`), `/admin` responde 200.
 
 ### PP-AUT-09 — Aceptar invitación desde la interfaz
 
@@ -127,7 +127,7 @@ npm run db:seed
   ```bash
   npx playwright test e2e/auth-invitation.spec.ts
   ```
-- **Resultado esperado:** código de salida 0; tras fijar la contraseña en `/invite/<token>`, el test comprueba que termina con sesión iniciada (cookie de sesión presente) y en la ruta correspondiente a su rol (`/admin` si es `admin`, `/collect` si es `collector`).
+- **Resultado esperado:** código de salida 0; tras fijar la contraseña en `/invite/<token>`, el test comprueba que termina con sesión iniciada (cookie de sesión presente) y en la ruta correspondiente a su rol (`/admin` si es `admin`, `/forms` si es `collector`).
 
 ### PP-AUT-10 — Los logins correctos no consumen cupo y reinician el contador
 
@@ -199,7 +199,44 @@ npm run db:seed
   ```
 - **Resultado esperado:** código de salida 0; un email inexistente y el admin del seed con contraseña incorrecta muestran exactamente «Email o contraseña incorrectos.»; tras 5 fallos con un email inventado único, el 6.º intento muestra «Demasiados intentos, prueba de nuevo más tarde.». Los tests no bloquean las cuentas del seed (usan emails inventados para el bloqueo).
 
+### PP-AUT-16 — Listado de formularios publicados (repositorio y servicio)
+
+- **Cubre:** RF-AUT-09, CA-AUT-14
+- **Tipo:** automático (Vitest)
+- **Precondiciones:** preparación (base de datos arriba).
+- **Pasos:**
+  ```bash
+  npx vitest run src/server/form-publishing/form-publishing.repository.test.ts -t "listPublishedForms"
+  npx vitest run src/server/form-publishing/form-publishing.service.test.ts -t "listPublishedFormsForOrg"
+  ```
+- **Resultado esperado:** código de salida 0 y al menos 1 test ejecutado en cada comando; el repositorio devuelve solo formularios publicados, no archivados y con slug, nunca los de otra organización ni borradores/despublicados; el servicio pasa el `organizationId` al repositorio.
+
+### PP-AUT-17 — Collector: `/admin` lleva al listado; «Rellenar»; sin sesión; aislamiento; `/collect` da 404
+
+- **Cubre:** CA-AUT-02, CA-AUT-11, CA-AUT-12, CA-AUT-13, CA-AUT-14
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** `npm run db:seed` ejecutado; el propio test crea sus formularios y una segunda organización en `beforeAll` y los borra en `afterAll`.
+- **Pasos:**
+  ```bash
+  npx playwright test e2e/auth-forms-list.spec.ts e2e/auth-admin-guard.spec.ts e2e/auth-invitation.spec.ts
+  ```
+- **Resultado esperado:** código de salida 0; el `collector` del seed que abre `/admin` acaba en `/forms` y ve el formulario publicado pero no el borrador ni el de la otra organización; el enlace «Rellenar» lleva a `/f/<slug>`; sin sesión `/forms` termina en `/login`; `GET /collect` responde 404 con y sin sesión; en 360 px no hay desbordamiento horizontal.
+
+### PP-AUT-18 — No quedan referencias a `/collect`
+
+- **Cubre:** CA-AUT-12, CA-AUT-15
+- **Tipo:** automático (shell)
+- **Precondiciones:** ninguna.
+- **Pasos:**
+  ```bash
+  test ! -e src/app/collect
+  ! grep -rnE "/collect([^o]|$)" src middleware.ts e2e prisma
+  ```
+- **Resultado esperado:** ambos comandos terminan con código 0: el directorio `src/app/collect` no existe y `grep` no encuentra ninguna línea con `/collect` (el patrón excluye `/collector`). Las rutas como `e2e/helpers` no se ven afectadas. El test e2e del 404 construye la ruta sin la cadena literal contigua (`const removed = "/" + "collect"`), para que este `grep` pueda pasar.
+
 ## Comprobaciones manuales
+
+- [ ] `/forms` se ve bien en móvil (360 px) con varios formularios publicados: tarjetas legibles, botón «Rellenar» fácil de pulsar con el pulgar — Cubre: RF-AUT-09.
 
 - [ ] El email de enlace mágico y el de invitación llegan a Mailpit (`http://localhost:8025`) con el enlace correcto y son legibles — Cubre: RF-AUT-02, RF-AUT-04.
 - [ ] El formulario de login y el de aceptar invitación se ven bien en móvil (360 px) — Cubre: RNF-AUT-01 (experiencia), consistente con CLAUDE.md "móvil primero".
@@ -216,4 +253,5 @@ docker compose down -v --remove-orphans
 
 - 2026-11-17 — Plan de pruebas inicial (#4): casos PP-AUT-01 a PP-AUT-09 para el login con contraseña, el enlace mágico, las invitaciones, el aislamiento por organización (CA-AUT-01), la autodesactivación bloqueada y el guardián de `/admin` (CA-AUT-02).
 - 2026-11-17 — Revisión del arquitecto (#4, APROBADO): PP-AUT-07/08 fijan las credenciales exactas del seed (antes sin valor concreto); PP-AUT-07 añade la comprobación de los atributos `HttpOnly`/`SameSite` de la cookie de sesión (RNF-AUT-03).
+- 2026-11-27 — Retirar `/collect` (#39): PP-AUT-08 y PP-AUT-09 esperan `/forms`; nuevos PP-AUT-16 a PP-AUT-18 (RF-AUT-09, CA-AUT-11 a CA-AUT-15) y una comprobación manual en móvil.
 - 2026-11-24 — Límite de fallos y motivo de login (#20): PP-AUT-02 apunta al nuevo nombre de test; nuevos PP-AUT-10 a PP-AUT-15 (CA-AUT-06 a CA-AUT-10, RNF-AUT-04/05) y una comprobación manual del log.
