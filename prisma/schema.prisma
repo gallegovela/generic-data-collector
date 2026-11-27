@@ -22,17 +22,55 @@ enum UserStatus {
   inactive
 }
 
+enum UsageKind {
+  impression
+  submission
+}
+
+// Planes de uso (admin-settings, #40). Globales: no llevan organizationId.
+model Plan {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  maxImpressionsPerHour Int? // null = sin límite
+  maxSubmissionsPerHour Int?
+  maxFileBytes          Int?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  organizations Organization[]
+
+  @@map("plans")
+}
+
+model UsageCounter {
+  id             String    @id @default(cuid())
+  organizationId String
+  formId         String // identificador lógico, sin FK (como Submission.formId)
+  kind           UsageKind
+  windowStart    DateTime // hora natural UTC
+  count          Int       @default(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, formId, kind, windowStart])
+  @@index([windowStart])
+  @@map("usage_counters")
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
+  planId    String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users       User[]
-  invitations Invitation[]
-  forms       Form[]
-  submissions Submission[]
-  storedFiles StoredFile[]
+  plan          Plan           @relation(fields: [planId], references: [id])
+  users         User[]
+  invitations   Invitation[]
+  forms         Form[]
+  submissions   Submission[]
+  storedFiles   StoredFile[]
+  usageCounters UsageCounter[]
 
   @@map("organizations")
 }

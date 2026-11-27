@@ -1,4 +1,6 @@
+import { formatMb } from "@/lib/admin-settings/plan.schema";
 import { getEnv } from "@/lib/env";
+import { getEffectiveLimits } from "@/server/admin-settings/usage-limits.service";
 import {
   ConflictError,
   NotFoundError,
@@ -57,6 +59,13 @@ export async function uploadFile(
   }
   if (bytes.byteLength > getEnv().STORAGE_MAX_UPLOAD_BYTES) {
     throw new PayloadTooLargeError();
+  }
+  // Límite del plan (RF-STO-12), siempre dentro del tope técnico anterior.
+  const { maxFileBytes } = await getEffectiveLimits(organizationId);
+  if (maxFileBytes !== null && bytes.byteLength > maxFileBytes) {
+    throw new PayloadTooLargeError(
+      `El archivo supera el tamaño máximo de tu plan (${formatMb(maxFileBytes)}).`,
+    );
   }
 
   const contentType = detectFileType(bytes);

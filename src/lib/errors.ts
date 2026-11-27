@@ -63,6 +63,19 @@ export class RateLimitError extends Error {
   }
 }
 
+export type PlanLimitKind = "impressions" | "submissions";
+
+/** Límite del plan de uso alcanzado (HTTP 429 para el consumidor). */
+export class PlanLimitError extends Error {
+  constructor(
+    public readonly limit: PlanLimitKind,
+    message = "Se ha alcanzado el límite de tu plan. Inténtalo más tarde.",
+  ) {
+    super(message);
+    this.name = "PlanLimitError";
+  }
+}
+
 /**
  * Usuario `inactive` con contraseña correcta. Hereda de UnauthorizedError
  * (mismo mensaje hacia fuera) pero permite registrar el motivo real.

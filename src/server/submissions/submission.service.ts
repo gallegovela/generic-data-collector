@@ -12,6 +12,7 @@ import {
   MAX_SUBMISSION_ANSWERS_BYTES,
   type CreateSubmissionInput,
 } from "@/lib/submissions-dashboard/create-submission.schema";
+import { assertUsage, refundUsage } from "@/server/admin-settings/usage-limits.service";
 import { SubmissionValidationError } from "@/lib/submissions-dashboard/submission-errors";
 import {
   SUBMISSIONS_PAGE_SIZE,
@@ -115,7 +116,12 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
   const fileErrors = findInvalidFileFields(organizationId, schema.data.fields, validation.data);
   if (fileErrors.length > 0) throw new SubmissionValidationError(fileErrors);
 
-  // 8. Guardado.
+  // 8. Límite del plan (RF-SUB-13): tras idempotencia y validación, para no gastar cupo en
+  // respuestas repetidas o rechazadas. Lanza PlanLimitError si se ha alcanzado.
+  const now = new Date();
+  await assertUsage(organizationId, form.id, "submission", now);
+
+  // 9. Guardado. Si falla, se devuelve el cupo.
   try {
     const submission = await insertSubmission(organizationId, {
       formId: form.id,
@@ -131,6 +137,7 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
     });
     return { submission, created: true };
   } catch (error) {
+    await refundUsage(organizationId, form.id, "submission", now).catch(() => undefined);
     if (!isUniqueViolation(error)) throw error;
     const raced = await findSubmissionByClientId(organizationId, clientId);
     if (!raced) throw error;

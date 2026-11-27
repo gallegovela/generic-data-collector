@@ -1,5 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConflictError, ForbiddenError, NotFoundError, PlanLimitError } from "@/lib/errors";
+import { ensureGenericPlan } from "@/server/admin-settings/test-helpers";
 import type { FormVersion } from "@/lib/form-schema";
 import type { CreateSubmissionInput } from "@/lib/submissions-dashboard/create-submission.schema";
 import { SubmissionValidationError } from "@/lib/submissions-dashboard/submission-errors";
@@ -9,6 +10,19 @@ import {
   buildDailyReportFormVersion,
   DAILY_REPORT_FORM_TITLE,
 } from "../../../prisma/fixtures/submissions-dashboard.fixtures";
+// Permite simular un fallo del insert (el cupo debe devolverse).
+const failure = vi.hoisted(() => ({ insert: false }));
+vi.mock("./submission.repository", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./submission.repository")>();
+  return {
+    ...original,
+    insertSubmission: (...args: Parameters<typeof original.insertSubmission>) => {
+      if (failure.insert) return Promise.reject(new Error("insert falla"));
+      return original.insertSubmission(...args);
+    },
+  };
+});
+
 import { createSubmissionFixture } from "./submission.repository";
 import { createSubmission, getHomeStats, getSubmissionDetail, listSubmissions } from "./submission.service";
 
@@ -336,5 +350,92 @@ describe("createSubmission", () => {
     const only2 = await listSubmissions(org.id, "create-form", { page: 1, version: 2 });
     expect(only2.items.every((i) => i.formVersionNumber === 2)).toBe(true);
     expect((await listSubmissions(org.id, "create-form", { page: 1, version: 99 })).total).toBe(0);
+  });
+});
+
+// Cubre: CA-SET-02, CA-SET-03, CA-SUB-15, RF-SUB-13
+describe("límite de plan (createSubmission)", () => {
+  let plan: { id: string };
+  let org: { id: string };
+  let uniqueN = 0;
+
+  const make = (clientId: string): CreateSubmissionInput => ({
+    organizationId: org.id,
+    actor: { kind: "anonymous" },
+    form: {
+      id: "plan-form",
+      title: DAILY_REPORT_FORM_TITLE,
+      versionId: "ver-1",
+      versionNumber: 1,
+      schema: buildDailyReportFormVersion(),
+    },
+    clientId,
+    answers: { site: "Obra 1", has_incidents: false },
+    capturedAt: new Date("2026-03-10T10:00:00Z"),
+  });
+  const cid = () => `00000000-0000-4000-8000-${String(900000000000 + uniqueN++)}`;
+  const used = async () =>
+    (await prisma.usageCounter.findFirst({ where: { organizationId: org.id, formId: "plan-form", kind: "submission" } }))
+      ?.count ?? 0;
+  const rows = () => prisma.submission.count({ where: { organizationId: org.id } });
+  const setLimit = (maxSubmissionsPerHour: number | null) =>
+    prisma.plan.update({ where: { id: plan.id }, data: { maxSubmissionsPerHour } });
+
+  beforeAll(async () => {
+    await ensureGenericPlan();
+    plan = await prisma.plan.create({ data: { name: `Plan submission test ${Date.now()}`, maxSubmissionsPerHour: 2 } });
+    org = await createOrganization({ name: "Org (límite de plan submission test)", planId: plan.id });
+  });
+
+  beforeEach(async () => {
+    failure.insert = false;
+    await prisma.submission.deleteMany({ where: { organizationId: org.id } });
+    await prisma.usageCounter.deleteMany({ where: { organizationId: org.id } });
+    await setLimit(2);
+  });
+
+  afterAll(async () => {
+    await prisma.submission.deleteMany({ where: { organizationId: org.id } });
+    await prisma.organization.deleteMany({ where: { id: org.id } });
+    await prisma.plan.deleteMany({ where: { id: plan.id } });
+  });
+
+  describe("límite de recepciones", () => {
+    it("con límite 2 la tercera lanza PlanLimitError y no crea la respuesta", async () => {
+      await createSubmission(make(cid()));
+      await createSubmission(make(cid()));
+      await expect(createSubmission(make(cid()))).rejects.toBeInstanceOf(PlanLimitError);
+      expect(await rows()).toBe(2);
+    });
+
+    it("el reenvío de la primera devuelve created:false sin consumir cupo", async () => {
+      const first = make(cid());
+      await createSubmission(first);
+      await createSubmission(make(cid()));
+      const again = await createSubmission(first);
+      expect(again.created).toBe(false);
+      expect(await used()).toBe(2);
+    });
+
+    it("si el insert falla el cupo se devuelve", async () => {
+      failure.insert = true;
+      await expect(createSubmission(make(cid()))).rejects.toThrow("insert falla");
+      expect(await used()).toBe(0);
+      expect(await rows()).toBe(0);
+    });
+
+    it("una respuesta inválida no gasta cupo", async () => {
+      const bad = { ...make(cid()), answers: { has_incidents: false } };
+      await expect(createSubmission(bad)).rejects.toBeInstanceOf(SubmissionValidationError);
+      expect(await used()).toBe(0);
+    });
+  });
+
+  describe("sin límite", () => {
+    it("con maxSubmissionsPerHour nulo no se rechaza nada por plan", async () => {
+      await setLimit(null);
+      for (let n = 0; n < 5; n++) await createSubmission(make(cid()));
+      expect(await rows()).toBe(5);
+    });
   });
 });

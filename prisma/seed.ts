@@ -11,10 +11,23 @@ const ORGANIZATION_NAME = "Constructora Demo";
 const DEMO_PASSWORD = "Demo1234!";
 
 async function main() {
+  // Plan genérico de admin-settings (#40): idempotente, antes de la organización.
+  const plan = await prisma.plan.upsert({
+    where: { id: "plan-generic" },
+    update: {},
+    create: {
+      id: "plan-generic",
+      name: "Genérico",
+      maxImpressionsPerHour: 10000,
+      maxSubmissionsPerHour: 1000,
+      maxFileBytes: 10485760,
+    },
+  });
+
   const organization = await prisma.organization.upsert({
     where: { id: "demo-org" },
     update: {},
-    create: { id: "demo-org", name: ORGANIZATION_NAME },
+    create: { id: "demo-org", name: ORGANIZATION_NAME, planId: plan.id },
   });
 
   const passwordHash = await hashPassword(DEMO_PASSWORD);
