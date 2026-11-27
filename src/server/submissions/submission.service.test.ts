@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import type { FormVersion } from "@/lib/form-schema";
-import type { CreateSubmissionInput } from "@/lib/submissions-dashboard/create-submission.schema";
+import {
+  parseSubmissionConsent,
+  type CreateSubmissionInput,
+} from "@/lib/submissions-dashboard/create-submission.schema";
 import { SubmissionValidationError } from "@/lib/submissions-dashboard/submission-errors";
 import { createOrganization } from "@/server/auth/organization.repository";
 import { prisma } from "@/server/db/client";
@@ -151,6 +154,37 @@ describe("createSubmission", () => {
   afterAll(async () => {
     await prisma.submission.deleteMany({ where: { organizationId: { in: [org.id, otherOrg.id] } } });
     await prisma.organization.deleteMany({ where: { id: { in: [org.id, otherOrg.id] } } });
+  });
+
+  describe("CA-SUB-15", () => {
+    const consent = {
+      termsUrl: "https://example.com/terminos",
+      privacyUrl: "https://example.com/privacidad",
+      formVersionNumber: 1,
+    };
+
+    // Cubre: CA-SUB-15
+    it("con consent guarda acceptedAt puesto por el servidor, distinto de capturedAt", async () => {
+      const { submission } = await createSubmission(input({ consent }));
+      const saved = parseSubmissionConsent(submission.consent);
+      expect(saved).not.toBeNull();
+      expect(saved).toMatchObject(consent);
+      expect(saved?.acceptedAt).not.toBe(submission.capturedAt.toISOString());
+      expect(Math.abs(Date.now() - new Date(saved?.acceptedAt ?? 0).getTime())).toBeLessThan(60_000);
+    });
+
+    it("sin consent queda null", async () => {
+      const { submission } = await createSubmission(input());
+      expect(submission.consent).toBeNull();
+    });
+
+    it("el mismo clientId no cambia acceptedAt", async () => {
+      const i = input({ consent });
+      const first = await createSubmission(i);
+      const second = await createSubmission(i);
+      expect(second.created).toBe(false);
+      expect(second.submission.consent).toEqual(first.submission.consent);
+    });
   });
 
   describe("CA-SUB-10", () => {

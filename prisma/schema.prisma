@@ -127,6 +127,7 @@ model FormVersion {
   version           Int
   schema            Json
   publishedByUserId String?
+  consent           Json?
   createdAt         DateTime @default(now())
 
   form Form @relation(fields: [formId], references: [id])
@@ -151,6 +152,7 @@ model Submission {
   formVersionId       String?
   formVersionNumber   Int?
   submittedByUserId   String?
+  consent             Json?
   capturedAt          DateTime
   syncedAt            DateTime @default(now())
   createdAt           DateTime @default(now())

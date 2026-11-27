@@ -54,3 +54,13 @@ export function buildSampleSubmissions(formId: string, prefix: string): SampleSu
     capturedAt: new Date(now - i * 60_000),
   }));
 }
+
+/** Prueba de aceptación de ejemplo para una respuesta (#38). Cubre: CA-SUB-15 */
+export function buildSampleConsent(formVersionNumber = 1) {
+  return {
+    acceptedAt: new Date().toISOString(),
+    termsUrl: "https://example.com/terminos",
+    privacyUrl: "https://example.com/privacidad",
+    formVersionNumber,
+  };
+}

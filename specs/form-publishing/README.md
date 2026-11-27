@@ -46,6 +46,10 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 | RF-PUB-09 | Must | Cada formulario tiene un modo de acceso `registered` (solo usuarios autenticados de su organización, admin o collector) o `public` (cualquiera con el enlace). Se elige al publicar, por defecto es `registered`, y se puede cambiar después sin crear una versión nueva. |
 | RF-PUB-10 | Must | Un formulario solo es rellenable si está publicado; despublicado (o archivado), el enlace informa de que ya no acepta respuestas. |
 | RF-PUB-11 | Must | Solo se puede publicar un borrador que cumpla el esquema de una versión (`FormVersionSchema`, al menos 1 campo); si no, la publicación se rechaza señalando los problemas. |
+| RF-PUB-12 | Must | Un formulario en modo `public` solo se puede publicar con **términos y condiciones**: un enlace `https` a los términos y otro a la política de privacidad de la organización, más la **declaración del administrador** de que son los de su organización, que actúa como responsable del tratamiento y que acepta el contrato de encargo de FormIA (ver `privacy-gdpr`). Sin los tres datos la publicación se rechaza. En modo `registered` no se piden. (#38) |
+| RF-PUB-13 | Must | Los términos se guardan **dentro de la `FormVersion`** (inmutables con ella): enlaces, quién y cuándo hizo la declaración. Cambiar los enlaces exige publicar una versión nueva; el panel rellena los campos con los de la última versión publicada. (#38) |
+| RF-PUB-14 | Must | Cambiar a `public` un formulario ya publicado cuya versión actual no tiene términos se rechaza hasta publicar de nuevo con ellos. Un formulario `public` cuya versión publicada no tiene términos (publicado antes de #38) se trata como **cerrado** ("Este formulario ya no acepta respuestas") hasta que se republique con términos. (#38) |
+| RF-PUB-15 | Must | La lectura para rellenar (`PublishedFormView`) incluye los términos de la versión (`consent`: enlaces y número de versión) y el nombre de la organización responsable, para que la pantalla de relleno los muestre; nunca incluye quién hizo la declaración. (#38) |
 
 ## Requisitos no funcionales
 
@@ -54,15 +58,17 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 | RNF-PUB-01 | El `slug` es corto (10 caracteres), generado con un generador criptográfico (≈ 50 bits) y no se puede deducir del nombre ni del id del formulario. |
 | RNF-PUB-02 | Toda operación de administración (publicar, despublicar, cambiar el modo, QR) filtra por `organizationId`; un formulario de otra organización responde 404. La lectura pública solo usa el `slug` y devuelve lo mínimo necesario para rellenar. |
 | RNF-PUB-03 | La migración es compatible con los formularios ya creados: siguen en `draft`, sin `slug`, con modo `registered`. |
+| RNF-PUB-04 | Los enlaces de términos y de privacidad solo admiten `https`, sin usuario ni contraseña y de hasta 2048 caracteres; se muestran siempre con `rel="noopener noreferrer"` y en pestaña nueva. FormIA no aloja ni edita el texto legal del cliente. (#38) |
 
 ## Datos
 
-- Posee: `FormVersion` y, del modelo `Form` de `form-editor`, las columnas `slug`, `accessMode` y `publishedVersion` (y el valor `published` de `status`).
+- Posee: `FormVersion` (con la columna `consent`, #38) y, del modelo `Form` de `form-editor`, las columnas `slug`, `accessMode` y `publishedVersion` (y el valor `published` de `status`).
 
 ## Dependencias
 
 - Depende de: form-schema, form-editor, tenancy-auth.
 - Lo usan: field-collector, submissions-dashboard, outputs.
+- #38 toca además `field-collector` (casilla de aceptación), `submissions-dashboard` (prueba de aceptación en `Submission`) y `privacy-gdpr` (papel de encargado); la aceptación se diseña de punta a punta en este módulo y los otros enlazan aquí.
 
 ## Criterios de aceptación
 
@@ -73,9 +79,16 @@ Convertir un borrador en un formulario utilizable, con versiones inmutables, y d
 - **CA-PUB-05** — Dado un formulario de la organización A, cuando un administrador de B intenta publicarlo o cambiarlo, entonces recibe 404.
 - **CA-PUB-06** — Dado un formulario publicado, cuando el administrador lo despublica, entonces su enlace deja de servir la definición y muestra "Este formulario ya no acepta respuestas"; al volver a publicarlo, el mismo enlace vuelve a funcionar con una versión nueva.
 - **CA-PUB-07** — Dado un borrador sin campos, cuando el administrador intenta publicarlo, entonces se rechaza con un mensaje claro y no se crea ninguna versión.
+- **CA-PUB-08** — Dado un borrador válido, cuando el administrador lo publica en modo `public` sin enlace de términos, sin enlace de privacidad, con un enlace que no es `https` o sin la declaración, entonces se rechaza señalando qué falta y no se crea ninguna versión; en modo `registered` se publica sin pedirlos. (#38)
+- **CA-PUB-09** — Dado un formulario publicado en modo `public` con términos, cuando se republica con otros enlaces, entonces la v1 conserva los enlaces antiguos y la v2 los nuevos, y el panel los muestra rellenados con los de la última versión. (#38)
+- **CA-PUB-10** — Dado un formulario publicado en `registered` (sin términos), cuando el administrador cambia el modo a `public`, entonces se rechaza hasta publicar de nuevo con términos; dado un formulario `public` cuya versión no tiene términos, entonces su enlace responde como cerrado. (#38)
+- **CA-PUB-11** — Dado un formulario `public` con términos, cuando alguien abre `/f/<slug>` o pide `GET /api/public/forms/<slug>`, entonces recibe los enlaces de términos y de privacidad y el nombre de la organización, y no recibe el id ni el nombre de quien hizo la declaración. (#38)
+
+> La prueba de aceptación que se guarda en la respuesta se especifica en [submissions-dashboard](../submissions-dashboard/README.md) (RF-SUB-13, CA-SUB-15). **La casilla que ve quien rellena (`/f/<slug>`, `FillForm`, `submitFill`) queda fuera de #38**: depende de #33 y la tratará una pieza posterior de `field-collector` (ver "Restricción" en [design.md](design.md#términos-y-condiciones-en-formularios-públicos-38)). Mientras no exista, un formulario `public` solo se puede publicar con términos, pero la pantalla de relleno no los muestra todavía.
 
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — Issue #26 (padre #23): nuevo modo de acceso (RF-PUB-09), regla de rellenado solo si está publicado (RF-PUB-10), publicación solo de borradores válidos (RF-PUB-11), RNF-PUB-01 a 03, CA-PUB-03 a 07; sección "Reglas" (las respuestas nunca se migran); RF-PUB-03 y RF-PUB-08 precisados; RF-PUB-07 aplazado; estado a "requisitos listos".
 - 2026-11-26 — Issue #26, revisión del arquitecto: nota de deuda sobre el tema en "Reglas".
+- 2026-11-27 — Issue #38 (padre #23): términos y condiciones obligatorios en formularios `public` (RF-PUB-12 a RF-PUB-15, RNF-PUB-04, CA-PUB-08 a CA-PUB-11); `FormVersion` gana `consent`.

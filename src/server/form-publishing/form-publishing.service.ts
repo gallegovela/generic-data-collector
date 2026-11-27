@@ -15,6 +15,13 @@ import {
   type ThemeSnapshot,
 } from "@/lib/form-schema";
 import { decideAccess } from "@/lib/form-publishing/access";
+import {
+  ConsentInputSchema,
+  parseStoredConsent,
+  toPublicConsent,
+  type PublicConsent,
+  type StoredConsent,
+} from "@/lib/form-publishing/consent.schema";
 import { buildFormLink } from "@/lib/form-publishing/form-link";
 import type {
   AccessMode,
@@ -39,6 +46,9 @@ export type PublishedFormView = {
   version: number;
   schema: FormSchemaVersion;
   theme: ThemeSnapshot;
+  organizationName: string;
+  /** null en modo registered. En modo public siempre hay valor (si no, se trata como cerrado). */
+  consent: PublicConsent | null;
 };
 
 export type FormLookup = { state: "published"; form: PublishedFormView } | { state: "closed" };
@@ -50,6 +60,7 @@ export type StoredFormVersion = {
   version: number;
   schema: FormSchemaVersion;
   createdAt: Date;
+  consent: StoredConsent | null;
 };
 
 export type PublishingState = {
@@ -58,6 +69,10 @@ export type PublishingState = {
   accessMode: AccessMode;
   publishedVersion: number | null;
   link: string | null;
+  /** Términos de la versión publicada actual (null si no tiene). */
+  consent: PublicConsent | null;
+  /** Términos de la última versión que los tuvo (para rellenar el panel). */
+  suggestedConsent: PublicConsent | null;
 };
 
 export class PublishValidationError extends ValidationError {
@@ -104,6 +119,26 @@ export async function publishForm(
     );
   }
 
+  let consent: StoredConsent | null = null;
+  if (input.accessMode === "public") {
+    const parsedConsent = ConsentInputSchema.safeParse(input.consent);
+    if (!parsedConsent.success) {
+      const issues = input.consent === undefined || input.consent === null
+        ? [{ path: "consent", message: "Un formulario público necesita términos y condiciones." }]
+        : parsedConsent.error.issues.map((i) => ({
+            path: ["consent", ...i.path].join("."),
+            message: i.message,
+          }));
+      throw new PublishValidationError(issues);
+    }
+    consent = {
+      termsUrl: parsedConsent.data.termsUrl,
+      privacyUrl: parsedConsent.data.privacyUrl,
+      declaredByUserId: userId,
+      declaredAt: new Date().toISOString(),
+    };
+  }
+
   let lastError: unknown = null;
   for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt++) {
     const slug = form.slug ?? generateSlug();
@@ -113,6 +148,7 @@ export async function publishForm(
         accessMode: input.accessMode,
         slug,
         userId,
+        consent,
       });
       if (!result) throw new NotFoundError(FORM_NOT_FOUND);
       const finalSlug = result.form.slug ?? slug;
@@ -141,17 +177,38 @@ export async function setFormAccessMode(
   formId: string,
   input: SetAccessModeInput,
 ): Promise<void> {
+  if (input.accessMode === "public") {
+    const current = await repository.findFormForPublishing(organizationId, formId);
+    if (!current) throw new NotFoundError(FORM_NOT_FOUND);
+    if (current.status === "published") {
+      const stored =
+        current.publishedVersion === null
+          ? null
+          : await repository.findVersion(organizationId, formId, current.publishedVersion);
+      if (!stored || parseStoredConsent(stored.consent) === null) {
+        throw new ValidationError(
+          "Para hacer público el formulario, publica de nuevo con los términos y condiciones.",
+        );
+      }
+    }
+  }
   const form = await repository.setAccessMode(organizationId, formId, input.accessMode);
   if (!form) throw new NotFoundError(FORM_NOT_FOUND);
 }
 
-function toPublishingState(form: Form): PublishingState {
+function toPublishingState(
+  form: Form,
+  consent: PublicConsent | null,
+  suggestedConsent: PublicConsent | null,
+): PublishingState {
   return {
     status: form.status,
     slug: form.slug,
     accessMode: form.accessMode,
     publishedVersion: form.publishedVersion,
     link: form.slug ? buildFormLink(loadEnv().AUTH_URL, form.slug) : null,
+    consent,
+    suggestedConsent,
   };
 }
 
@@ -161,7 +218,18 @@ export async function getPublishingState(
 ): Promise<PublishingState> {
   const form = await repository.findFormForPublishing(organizationId, formId);
   if (!form) throw new NotFoundError(FORM_NOT_FOUND);
-  return toPublishingState(form);
+  const published =
+    form.publishedVersion === null
+      ? null
+      : await repository.findVersion(organizationId, formId, form.publishedVersion);
+  const current = parseStoredConsent(published?.consent);
+  const latest = await repository.findLatestConsentVersion(organizationId, formId);
+  const suggested = parseStoredConsent(latest?.consent);
+  return toPublishingState(
+    form,
+    current ? toPublicConsent(current) : null,
+    suggested ? toPublicConsent(suggested) : null,
+  );
 }
 
 /**
@@ -180,6 +248,9 @@ export async function getPublishedFormBySlug(slug: string): Promise<FormLookup> 
   const stored = await repository.findVersion(form.organizationId, form.id, form.publishedVersion);
   if (!stored) return { state: "closed" };
 
+  const storedConsent = parseStoredConsent(stored.consent);
+  if (form.accessMode === "public" && storedConsent === null) return { state: "closed" };
+
   return {
     state: "published",
     form: {
@@ -193,6 +264,8 @@ export async function getPublishedFormBySlug(slug: string): Promise<FormLookup> 
       schema: FormVersionSchema.parse(stored.schema),
       // TODO(theming): sustituir por el tema real de la organización
       theme: DEFAULT_THEME,
+      organizationName: form.organization.name,
+      consent: form.accessMode === "public" && storedConsent ? toPublicConsent(storedConsent) : null,
     },
   };
 }
@@ -233,5 +306,6 @@ export async function getFormVersion(versionId: string): Promise<StoredFormVersi
     version: stored.version,
     schema: FormVersionSchema.parse(stored.schema),
     createdAt: stored.createdAt,
+    consent: parseStoredConsent(stored.consent),
   };
 }

@@ -7,9 +7,10 @@ const HEADERS = { "Cache-Control": "no-store" };
 
 /**
  * Definición de un formulario publicado para rellenarlo, con control de
- * acceso por modo. No devuelve `organizationId`.
+ * acceso por modo. Incluye `consent` y `organizationName`; no devuelve
+ * `organizationId` ni `declaredBy*`.
  *
- * Cubre: RF-PUB-04, RF-PUB-09, RF-PUB-10, CA-PUB-04, CA-PUB-06
+ * Cubre: RF-PUB-15, RF-PUB-04, RF-PUB-09, RF-PUB-10, CA-PUB-04, CA-PUB-06
  */
 export async function GET(
   _request: Request,

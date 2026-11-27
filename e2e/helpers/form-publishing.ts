@@ -1,3 +1,4 @@
+import { TEST_CONSENT_INPUT } from "@/lib/form-publishing/consent.fixtures";
 import { findUserByEmail } from "@/server/auth/user.repository";
 import { publishForm } from "@/server/form-publishing/form-publishing.service";
 import { ADMIN_EMAIL } from "./form-editor";
@@ -11,5 +12,10 @@ export async function publishViaService(
 ): Promise<{ version: number; slug: string; link: string }> {
   const admin = await findUserByEmail(ADMIN_EMAIL);
   if (!admin) throw new Error("Falta el usuario demo: ejecuta `npm run db:seed`.");
-  return publishForm(admin.organizationId, admin.id, formId, { accessMode });
+  return publishForm(
+    admin.organizationId,
+    admin.id,
+    formId,
+    accessMode === "public" ? { accessMode, consent: TEST_CONSENT_INPUT } : { accessMode },
+  );
 }

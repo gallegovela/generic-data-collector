@@ -1,5 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ForbiddenError, NotFoundError, UnauthorizedError } from "@/lib/errors";
+import {
+  ForbiddenError,
+  NotFoundError,
+  UnauthorizedError,
+  ValidationError,
+} from "@/lib/errors";
+import { TEST_CONSENT_INPUT } from "@/lib/form-publishing/consent.fixtures";
 import type { DraftForm } from "@/lib/form-editor/form-editor.schema";
 import { FormVersionSchema, validateSubmission } from "@/lib/form-schema";
 import { isValidSlug } from "@/lib/form-publishing/slug";
@@ -18,6 +24,8 @@ import {
 } from "./form-publishing.service";
 
 // Requiere PostgreSQL accesible vía DATABASE_URL (ver specs/form-publishing/test-plan.md).
+
+const PUBLIC_INPUT = { accessMode: "public" as const, consent: TEST_CONSENT_INPUT };
 
 const text = (id: string, label: string, required = false) =>
   ({ id, type: "text" as const, label, required, config: {} });
@@ -101,7 +109,7 @@ describe("form-publishing.service", () => {
     expect((await getFormForFilling(slug, { organizationId: orgA.id })).state).toBe("published");
 
     const pub = await newForm("CA04 pub");
-    const published = await publishForm(orgA.id, userA, pub, { accessMode: "public" });
+    const published = await publishForm(orgA.id, userA, pub, PUBLIC_INPUT);
     expect((await getFormForFilling(published.slug, null)).state).toBe("published");
   });
 
@@ -121,7 +129,7 @@ describe("form-publishing.service", () => {
   // Cubre: CA-PUB-06
   it("CA-PUB-06: despublicar cierra el enlace y republicar conserva el slug con versión 2", async () => {
     const id = await newForm("CA06");
-    const first = await publishForm(orgA.id, userA, id, { accessMode: "public" });
+    const first = await publishForm(orgA.id, userA, id, PUBLIC_INPUT);
     await unpublishForm(orgA.id, id);
     expect(await getPublishedFormBySlug(first.slug)).toEqual({ state: "closed" });
     // idempotente
@@ -130,7 +138,7 @@ describe("form-publishing.service", () => {
     const state = await getPublishingState(orgA.id, id);
     expect(state).toMatchObject({ status: "draft", slug: first.slug, publishedVersion: 1 });
 
-    const second = await publishForm(orgA.id, userA, id, { accessMode: "public" });
+    const second = await publishForm(orgA.id, userA, id, PUBLIC_INPUT);
     expect(second.slug).toBe(first.slug);
     expect(second.version).toBe(2);
     expect((await getPublishedFormBySlug(first.slug)).state).toBe("published");
@@ -154,9 +162,11 @@ describe("form-publishing.service", () => {
   it("RF-PUB-09: modo por defecto registered; cambiar el modo no crea versión; slug estable al renombrar", async () => {
     const id = await newForm("RF09");
     expect((await getPublishingState(orgA.id, id)).accessMode).toBe("registered");
-    const { slug } = await publishForm(orgA.id, userA, id, { accessMode: "registered" });
+    const { slug } = await publishForm(orgA.id, userA, id, PUBLIC_INPUT);
     expect(isValidSlug(slug)).toBe(true);
 
+    await setFormAccessMode(orgA.id, id, { accessMode: "registered" });
+    expect((await getPublishingState(orgA.id, id)).accessMode).toBe("registered");
     await setFormAccessMode(orgA.id, id, { accessMode: "public" });
     expect((await getPublishingState(orgA.id, id)).accessMode).toBe("public");
     expect(await prisma.formVersion.count({ where: { formId: id } })).toBe(1);
@@ -168,7 +178,7 @@ describe("form-publishing.service", () => {
   // Cubre: RF-PUB-10
   it("RF-PUB-10: archivar un formulario publicado lo cierra y un slug desconocido es NotFoundError", async () => {
     const id = await newForm("RF10");
-    const { slug } = await publishForm(orgA.id, userA, id, { accessMode: "public" });
+    const { slug } = await publishForm(orgA.id, userA, id, PUBLIC_INPUT);
     await archiveForm(orgA.id, id);
     expect(await getPublishedFormBySlug(slug)).toEqual({ state: "closed" });
     await expect(getPublishedFormBySlug("zzzzzzzzzz")).rejects.toBeInstanceOf(NotFoundError);
@@ -178,5 +188,109 @@ describe("form-publishing.service", () => {
   // Cubre: RF-PUB-03
   it("RF-PUB-03: getFormVersion devuelve null si no existe", async () => {
     expect(await getFormVersion("inexistente")).toBeNull();
+  });
+
+  describe("CA-PUB-08", () => {
+    it("public sin consent, con enlace http o sin declaración lanza PublishValidationError y no crea versión", async () => {
+      const id = await newForm("CA08 invalid");
+      const bad = [
+        { accessMode: "public" as const },
+        { accessMode: "public" as const, consent: { ...TEST_CONSENT_INPUT, termsUrl: "http://example.com/t" } },
+        { accessMode: "public" as const, consent: { ...TEST_CONSENT_INPUT, publisherDeclaration: false } },
+      ];
+      for (const input of bad) {
+        const error = await publishForm(
+          orgA.id,
+          userA,
+          id,
+          input as unknown as Parameters<typeof publishForm>[3],
+        ).catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(PublishValidationError);
+        expect((error as PublishValidationError).issues[0]?.path).toMatch(/^consent/);
+      }
+      expect(await prisma.formVersion.count({ where: { formId: id } })).toBe(0);
+    });
+
+    it("registered sin consent publica y FormVersion.consent es null", async () => {
+      const id = await newForm("CA08 registered");
+      await publishForm(orgA.id, userA, id, { accessMode: "registered" });
+      const version = await prisma.formVersion.findFirstOrThrow({ where: { formId: id } });
+      expect(version.consent).toBeNull();
+    });
+
+    it("public válido guarda consent con declaredByUserId y declaredAt", async () => {
+      const id = await newForm("CA08 valid");
+      await publishForm(orgA.id, userA, id, PUBLIC_INPUT);
+      const version = await prisma.formVersion.findFirstOrThrow({ where: { formId: id } });
+      expect(version.consent).toMatchObject({
+        termsUrl: TEST_CONSENT_INPUT.termsUrl,
+        privacyUrl: TEST_CONSENT_INPUT.privacyUrl,
+        declaredByUserId: userA,
+      });
+      expect(typeof (version.consent as { declaredAt: unknown }).declaredAt).toBe("string");
+    });
+  });
+
+  describe("CA-PUB-09", () => {
+    it("cada versión conserva sus enlaces y suggestedConsent devuelve los últimos", async () => {
+      const id = await newForm("CA09");
+      const a = { ...TEST_CONSENT_INPUT, termsUrl: "https://a.example.com/t", privacyUrl: "https://a.example.com/p" };
+      const b = { ...TEST_CONSENT_INPUT, termsUrl: "https://b.example.com/t", privacyUrl: "https://b.example.com/p" };
+      const v1 = await publishForm(orgA.id, userA, id, { accessMode: "public", consent: a });
+      const v2 = await publishForm(orgA.id, userA, id, { accessMode: "public", consent: b });
+      const lookup = await getPublishedFormBySlug(v1.slug);
+      if (lookup.state !== "published") throw new Error("esperaba published");
+      const stored2 = await getFormVersion(lookup.form.versionId);
+      expect(stored2?.consent?.termsUrl).toBe(b.termsUrl);
+      const first = await prisma.formVersion.findFirstOrThrow({ where: { formId: id, version: v1.version } });
+      expect((await getFormVersion(first.id))?.consent?.termsUrl).toBe(a.termsUrl);
+      expect(v2.version).toBe(2);
+
+      const state = await getPublishingState(orgA.id, id);
+      expect(state.suggestedConsent).toEqual({ termsUrl: b.termsUrl, privacyUrl: b.privacyUrl });
+    });
+  });
+
+  describe("CA-PUB-10", () => {
+    it("registered publicado → public lanza ValidationError; en borrador se permite", async () => {
+      const id = await newForm("CA10 published");
+      await publishForm(orgA.id, userA, id, { accessMode: "registered" });
+      await expect(setFormAccessMode(orgA.id, id, { accessMode: "public" })).rejects.toBeInstanceOf(
+        ValidationError,
+      );
+      expect((await getPublishingState(orgA.id, id)).accessMode).toBe("registered");
+
+      const draftId = await newForm("CA10 draft");
+      await setFormAccessMode(orgA.id, draftId, { accessMode: "public" });
+      expect((await getPublishingState(orgA.id, draftId)).accessMode).toBe("public");
+    });
+
+    it("un formulario public con FormVersion.consent null se sirve como cerrado", async () => {
+      const id = await newForm("CA10 closed");
+      const { slug } = await publishForm(orgA.id, userA, id, { accessMode: "registered" });
+      await prisma.form.update({ where: { id }, data: { accessMode: "public" } });
+      expect(await getPublishedFormBySlug(slug)).toEqual({ state: "closed" });
+    });
+  });
+
+  describe("CA-PUB-11", () => {
+    it("public devuelve consent y organizationName sin declaredByUserId; registered devuelve consent null", async () => {
+      const pubId = await newForm("CA11 public");
+      const pub = await publishForm(orgA.id, userA, pubId, PUBLIC_INPUT);
+      const lookup = await getPublishedFormBySlug(pub.slug);
+      if (lookup.state !== "published") throw new Error("esperaba published");
+      expect(lookup.form.consent).toEqual({
+        termsUrl: TEST_CONSENT_INPUT.termsUrl,
+        privacyUrl: TEST_CONSENT_INPUT.privacyUrl,
+      });
+      expect(lookup.form.organizationName).toBe("Org A (form-publishing.service test)");
+      expect(JSON.stringify(lookup.form)).not.toContain("declaredBy");
+
+      const regId = await newForm("CA11 registered");
+      const reg = await publishForm(orgA.id, userA, regId, { accessMode: "registered" });
+      const regLookup = await getPublishedFormBySlug(reg.slug);
+      if (regLookup.state !== "published") throw new Error("esperaba published");
+      expect(regLookup.form.consent).toBeNull();
+    });
   });
 });

@@ -10,6 +10,9 @@ test("CA-PUB-01 CA-PUB-02: el admin publica, ve enlace y QR y abre /f/<slug>", a
   await page.goto(`/admin/forms/${id}`);
 
   await page.getByTestId("access-mode").selectOption("public");
+  await page.getByTestId("terms-url").fill("https://example.com/terminos");
+  await page.getByTestId("privacy-url").fill("https://example.com/privacidad");
+  await page.getByTestId("publisher-declaration").check();
   await page.getByTestId("publish-button").click();
 
   const link = page.getByTestId("form-link");

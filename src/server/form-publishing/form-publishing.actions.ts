@@ -30,7 +30,13 @@ export async function publishFormAction(
 ): Promise<PublishActionResult> {
   const user = await requireSession({ role: "admin" });
   const parsed = publishFormSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: INVALID };
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Revisa los términos y condiciones.",
+      issues: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+    };
+  }
 
   try {
     const result = await service.publishForm(user.organizationId, user.id, formId, parsed.data);

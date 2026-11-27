@@ -46,6 +46,7 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 | RF-SUB-10 | Should | Un panel de inicio (`/admin`) muestra el número de respuestas de hoy, de la semana y por formulario. |
 | RF-SUB-11 | Must | Cada respuesta guarda una copia inmutable del esquema (`FormVersion` de `form-schema`) con el que se rellenó, para mostrar siempre las etiquetas correctas aunque el formulario cambie después. |
 | RF-SUB-12 | Must | Cada respuesta indica la versión del formulario con la que se recogió (id y número, opcionales en respuestas anteriores a #27), el listado la muestra y se puede filtrar por ella. (#27) |
+| RF-SUB-13 | Must | Cuando la respuesta llega de un formulario `public`, se guarda la **prueba de aceptación** de los términos: fecha y hora del servidor, enlaces de términos y de privacidad, y número de versión del formulario. Es inmutable, se guarda una sola vez (un reenvío idempotente no la cambia) y la ficha de detalle la muestra con los enlaces. En formularios `registered` y en respuestas anteriores a #38 no existe. (#38) |
 
 ## Requisitos no funcionales
 
@@ -82,6 +83,8 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 - **CA-SUB-13** — Dado un usuario de la organización A, cuando intenta guardar con la organización B, entonces se rechaza y no se guarda. (#27)
 - **CA-SUB-14** — Dadas respuestas de dos versiones del mismo formulario, cuando se abre el listado, entonces cada fila muestra su versión y el filtro por versión deja solo las de esa versión. (#27)
 
+- **CA-SUB-15** — Dada una respuesta recibida de un formulario `public` con términos, cuando se abre su ficha, entonces se ven la fecha de aceptación, el número de versión y los enlaces de términos y privacidad; dada una respuesta de un formulario `registered`, la ficha no muestra ese bloque; dado un reenvío con el mismo `clientId`, la fecha de aceptación no cambia. (#38)
+
 ## Supuestos y preguntas abiertas
 
 - Proveedor de mapas para la ficha: **decidido en #7** — OpenStreetMap con `leaflet` + `react-leaflet`, sin clave de API (nuevas dependencias de npm, pendientes de la aprobación del arquitecto en el issue).
@@ -90,6 +93,7 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 
 ## Historial de cambios
 
+- 2026-11-27 — Issue #38: RF-SUB-13 y CA-SUB-15 (prueba de aceptación de términos en `Submission.consent`). Los exports CSV y Excel no cambian (ver pregunta en el issue).
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — Issue #27: recepción real (RF-SUB-01 a RF-SUB-04 pasan de "fuera de alcance" a incluidos, precisados); nuevo RF-SUB-12 (versión en cada respuesta, visible y filtrable); nuevas CA-SUB-10 a CA-SUB-14; `Submission` gana `formVersionId`, `formVersionNumber` y `submittedByUserId`. RF-SUB-09 sigue fuera (pertenece a `outputs`). CA-SUB-01 se cubre a nivel de servicio con CA-SUB-10 (el 200 HTTP lo da quien llama).
 - 2026-11-18 — Issue #7: alcance de la pieza (listado, ficha de detalle y panel de inicio, solo lectura, con datos de prueba); RF-SUB-05 y RF-SUB-08 precisados (paginación de 20, "sin ningún control para modificarlas"); nuevo RF-SUB-11 (copia inmutable del esquema en cada respuesta); nuevas CA-SUB-04 a CA-SUB-09; documentada la decisión de #1 sobre la futura edición de respuestas; `Submission.formId` sin clave foránea a `Form`/`FormVersion`; proveedor de mapas decidido (Leaflet/OpenStreetMap, dependencias nuevas pendientes de aprobación).
