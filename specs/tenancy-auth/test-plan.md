@@ -237,7 +237,6 @@ npm run db:seed
 ## Comprobaciones manuales
 
 - [ ] `/forms` se ve bien en móvil (360 px) con varios formularios publicados: tarjetas legibles, botón «Rellenar» fácil de pulsar con el pulgar — Cubre: RF-AUT-09.
-
 - [ ] El email de enlace mágico y el de invitación llegan a Mailpit (`http://localhost:8025`) con el enlace correcto y son legibles — Cubre: RF-AUT-02, RF-AUT-04.
 - [ ] El formulario de login y el de aceptar invitación se ven bien en móvil (360 px) — Cubre: RNF-AUT-01 (experiencia), consistente con CLAUDE.md "móvil primero".
 - [ ] Tras 6 intentos fallidos de login, el mensaje de "demasiados intentos" es comprensible para una persona no técnica — Cubre: RNF-AUT-04.
