@@ -1,9 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { login } from "./helpers/form-editor";
+import { buildSampleConsent } from "../prisma/fixtures/submissions-dashboard.fixtures";
 import { addSubmission, deleteSubmissionsOfForms, demoOrganizationId, uniqueFormId } from "./helpers/submissions-dashboard";
 
 const formId = uniqueFormId("detail");
 let submissionId: string;
+let consentSubmissionId: string;
 
 test.beforeAll(async () => {
   const org = await demoOrganizationId();
@@ -17,6 +19,11 @@ test.beforeAll(async () => {
     },
   });
   submissionId = s.id;
+  const withConsent = await addSubmission(org, formId, 2, {
+    formVersionNumber: 1,
+    consent: buildSampleConsent(1),
+  });
+  consentSubmissionId = withConsent.id;
 });
 test.afterAll(async () => deleteSubmissionsOfForms([formId]));
 
@@ -46,4 +53,19 @@ test("CA-SUB-07: la ficha es de solo lectura", async ({ page }) => {
   await expect(page.getByText("Obra Norte")).toBeVisible();
   await expect(page.locator("main input, main textarea, main select")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /guardar|editar/i })).toHaveCount(0);
+});
+
+test.describe("CA-SUB-15 prueba de aceptación en la ficha", () => {
+  // Cubre: CA-SUB-15
+  test("con consent muestra el bloque y los dos enlaces", async ({ page }) => {
+    await page.goto(`/admin/forms/${formId}/submissions/${consentSubmissionId}`);
+    await expect(page.getByTestId("submission-consent")).toBeVisible();
+    await expect(page.getByTestId("terms-link")).toHaveAttribute("href", "https://example.com/terminos");
+    await expect(page.getByTestId("privacy-link")).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  // Cubre: CA-SUB-15
+  test("sin consent no muestra el bloque", async ({ page }) => {
+    await expect(page.getByTestId("submission-consent")).toHaveCount(0);
+  });
 });

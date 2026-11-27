@@ -14,6 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  ConsentFields,
+  type ConsentFieldName,
+  type ConsentFieldsValue,
+} from "@/components/form-publishing/consent-fields";
+import {
   AccessModeSchema,
   type AccessMode,
 } from "@/lib/form-publishing/form-publishing.schema";
@@ -51,6 +56,12 @@ export function PublishPanel({
   const [accessMode, setAccessMode] = useState<AccessMode>(initialState.accessMode);
   const [error, setError] = useState<string | null>(null);
   const [issues, setIssues] = useState<{ path: string; message: string }[]>([]);
+  const [consent, setConsent] = useState<ConsentFieldsValue>({
+    termsUrl: initialState.suggestedConsent?.termsUrl ?? "",
+    privacyUrl: initialState.suggestedConsent?.privacyUrl ?? "",
+    publisherDeclaration: false,
+  });
+  const [notice, setNotice] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -62,23 +73,47 @@ export function PublishPanel({
       ? "Despublicado"
       : "Borrador";
 
+  const isPublic = accessMode === "public";
+  const consentComplete =
+    consent.termsUrl.trim() !== "" && consent.privacyUrl.trim() !== "" && consent.publisherDeclaration;
+
+  const consentErrors: Partial<Record<ConsentFieldName, string>> = {};
+  const generalIssues: { path: string; message: string }[] = [];
+  for (const issue of issues) {
+    const field = issue.path.startsWith("consent.") ? issue.path.slice("consent.".length) : null;
+    if (field === "termsUrl" || field === "privacyUrl" || field === "publisherDeclaration") {
+      consentErrors[field] = issue.message;
+    } else {
+      generalIssues.push(issue);
+    }
+  }
+
   const publish = () => {
     setError(null);
     setIssues([]);
     startTransition(async () => {
-      const result = await publishFormAction(formId, { accessMode });
+      const result = await publishFormAction(
+        formId,
+        isPublic ? { accessMode, consent: { ...consent, publisherDeclaration: true } } : { accessMode },
+      );
       if (!result.ok) {
         setError(result.error);
         setIssues(result.issues ?? []);
         return;
       }
-      setState({
+      setState((s) => ({
         status: "published",
         slug: result.slug,
         accessMode,
         publishedVersion: result.version,
         link: result.link,
-      });
+        consent: isPublic
+          ? { termsUrl: consent.termsUrl.trim(), privacyUrl: consent.privacyUrl.trim() }
+          : null,
+        suggestedConsent: isPublic
+          ? { termsUrl: consent.termsUrl.trim(), privacyUrl: consent.privacyUrl.trim() }
+          : s.suggestedConsent,
+      }));
     });
   };
 
@@ -88,6 +123,12 @@ export function PublishPanel({
     setAccessMode(parsed.data);
     if (!published) return;
     setError(null);
+    setNotice(null);
+    if (parsed.data === "public" && state.consent === null) {
+      // Sin términos en la versión publicada no se puede pasar a público sin republicar.
+      setNotice("Para hacerlo público, publica de nuevo con los términos y condiciones");
+      return;
+    }
     startTransition(async () => {
       const result = await setAccessModeAction(formId, { accessMode: parsed.data });
       if (!result.ok) {
@@ -155,7 +196,7 @@ export function PublishPanel({
           type="button"
           size="sm"
           data-testid="publish-button"
-          disabled={!canPublish || pending}
+          disabled={!canPublish || pending || (isPublic && !consentComplete)}
           onClick={publish}
         >
           {published ? "Publicar cambios" : "Publicar"}
@@ -174,6 +215,21 @@ export function PublishPanel({
         )}
       </div>
 
+      {isPublic && (
+        <ConsentFields
+          value={consent}
+          onChange={setConsent}
+          errors={consentErrors}
+          disabled={pending}
+        />
+      )}
+
+      {notice && isPublic && (
+        <p role="status" data-testid="consent-notice" className="text-sm text-muted-foreground">
+          {notice}
+        </p>
+      )}
+
       {saveFailed && (
         <p role="alert" data-testid="publish-blocked" className="text-sm text-destructive">
           No se pudo guardar el borrador; reinténtalo antes de publicar
@@ -183,9 +239,9 @@ export function PublishPanel({
       {error && (
         <div role="alert" data-testid="publish-error" className="text-sm text-destructive">
           <p>{error}</p>
-          {issues.length > 0 && (
+          {generalIssues.length > 0 && (
             <ul className="list-disc pl-5">
-              {issues.map((issue, i) => (
+              {generalIssues.map((issue, i) => (
                 <li key={`${issue.path}-${i}`}>{issue.message}</li>
               ))}
             </ul>

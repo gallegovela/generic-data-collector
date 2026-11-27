@@ -1,5 +1,6 @@
 import { Prisma, type Submission } from "@prisma/client";
 import { FormVersionSchema, type Field, type FormVersion } from "@/lib/form-schema";
+import type { SubmissionConsent } from "@/lib/submissions-dashboard/create-submission.schema";
 import { SUBMISSIONS_PAGE_SIZE } from "@/lib/submissions-dashboard/submission-filters.schema";
 import { prisma } from "@/server/db/client";
 
@@ -218,6 +219,7 @@ export function insertSubmission(
     submittedByUserId: string | null;
     submittedByName: string | null;
     capturedAt: Date;
+    consent: SubmissionConsent | null;
   },
 ): Promise<Submission> {
   return prisma.submission.create({
@@ -233,6 +235,7 @@ export function insertSubmission(
       submittedByUserId: data.submittedByUserId,
       submittedByName: data.submittedByName,
       capturedAt: data.capturedAt,
+      consent: data.consent ?? Prisma.DbNull,
     },
   });
 }
@@ -262,6 +265,7 @@ export function createSubmissionFixture(
     formVersionNumber?: number;
     submittedByUserId?: string;
     capturedAt: Date;
+    consent?: SubmissionConsent;
   },
 ): Promise<Submission> {
   return prisma.submission.create({
@@ -277,6 +281,7 @@ export function createSubmissionFixture(
       formVersionNumber: data.formVersionNumber ?? null,
       submittedByUserId: data.submittedByUserId ?? null,
       capturedAt: data.capturedAt,
+      consent: data.consent ?? Prisma.DbNull,
     },
   });
 }

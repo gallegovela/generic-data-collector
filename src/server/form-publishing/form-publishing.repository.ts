@@ -1,6 +1,7 @@
 import { Prisma, type Form, type FormVersion } from "@prisma/client";
 import { ConflictError } from "@/lib/errors";
 import type { FormVersion as FormSchemaVersion } from "@/lib/form-schema";
+import type { StoredConsent } from "@/lib/form-publishing/consent.schema";
 import type { AccessMode } from "@/lib/form-publishing/form-publishing.schema";
 import { prisma } from "@/server/db/client";
 
@@ -42,7 +43,7 @@ function uniqueTarget(error: unknown): string[] | null {
 export async function createVersionAndPublish(
   organizationId: string,
   formId: string,
-  data: { schema: FormSchemaVersion; accessMode: AccessMode; slug: string; userId: string },
+  data: { schema: FormSchemaVersion; accessMode: AccessMode; slug: string; userId: string; consent?: StoredConsent | null },
 ): Promise<{ form: Form; version: FormVersion } | null> {
   try {
     return await prisma.$transaction(async (tx) => {
@@ -64,6 +65,7 @@ export async function createVersionAndPublish(
           version: versionNumber,
           schema: data.schema,
           publishedByUserId: data.userId,
+          consent: data.consent ?? Prisma.DbNull,
         },
       });
       const form = await tx.form.update({
@@ -121,8 +123,24 @@ export function findVersion(
 }
 
 // Lectura sin sesión: se llega por slug o por id de versión.
-export function findFormBySlug(slug: string): Promise<Form | null> {
-  return prisma.form.findUnique({ where: { slug } });
+export function findFormBySlug(
+  slug: string,
+): Promise<(Form & { organization: { name: string } }) | null> {
+  return prisma.form.findUnique({
+    where: { slug },
+    include: { organization: { select: { name: true } } },
+  });
+}
+
+/** Última versión del formulario con `consent` no nulo (para rellenar el panel). */
+export function findLatestConsentVersion(
+  organizationId: string,
+  formId: string,
+): Promise<FormVersion | null> {
+  return prisma.formVersion.findFirst({
+    where: { organizationId, formId, consent: { not: Prisma.DbNull } },
+    orderBy: { version: "desc" },
+  });
 }
 
 export function findVersionById(versionId: string): Promise<FormVersion | null> {

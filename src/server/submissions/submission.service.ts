@@ -80,7 +80,7 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
   if (!parsedInput.success) {
     throw new SubmissionValidationError([{ fieldId: "_", message: "Los datos de la respuesta no son válidos." }]);
   }
-  const { organizationId, actor, form, clientId, answers, capturedAt } = parsedInput.data;
+  const { organizationId, actor, form, clientId, answers, capturedAt, consent } = parsedInput.data;
 
   // 2. Un usuario solo guarda en su propia organización.
   if (actor.kind === "user" && actor.userOrganizationId !== organizationId) {
@@ -128,6 +128,7 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
       submittedByUserId: actor.kind === "user" ? actor.userId : null,
       submittedByName: actor.kind === "user" ? actor.userName : null,
       capturedAt,
+      consent: consent ? { ...consent, acceptedAt: new Date().toISOString() } : null,
     });
     return { submission, created: true };
   } catch (error) {

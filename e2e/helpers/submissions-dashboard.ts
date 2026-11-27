@@ -1,4 +1,5 @@
 import type { FormVersion } from "@/lib/form-schema";
+import type { SubmissionConsent } from "@/lib/submissions-dashboard/create-submission.schema";
 import { findUserByEmail } from "@/server/auth/user.repository";
 import { prisma } from "@/server/db/client";
 import { createSubmissionFixture } from "@/server/submissions/submission.repository";
@@ -26,6 +27,7 @@ export async function addSubmission(
     title?: string;
     formVersion?: FormVersion;
     formVersionNumber?: number;
+    consent?: SubmissionConsent;
   } = {},
 ) {
   return createSubmissionFixture(organizationId, {
@@ -36,6 +38,7 @@ export async function addSubmission(
     answers: opts.answers ?? { site: `Obra ${n}`, has_incidents: false },
     submittedByName: opts.by ?? "Ana Encargada",
     capturedAt: opts.capturedAt ?? new Date(Date.now() - n * 1000),
+    ...(opts.consent ? { consent: opts.consent } : {}),
     // Igual que en producción: la versión publicada aporta siempre id y número juntos.
     ...(opts.formVersionNumber === undefined
       ? {}

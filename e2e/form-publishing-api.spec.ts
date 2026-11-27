@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { TEST_CONSENT_INPUT } from "@/lib/form-publishing/consent.fixtures";
 import { createOrganization } from "@/server/auth/organization.repository";
 import { prisma } from "@/server/db/client";
 import { createForm } from "@/server/forms/form.repository";
@@ -46,7 +47,7 @@ test("CA-PUB-05: el QR de un formulario de otra organización da 404", async ({ 
       name: "Ajeno",
       draft: { title: "Ajeno", fields: FIELDS },
     });
-    await publishForm(other.id, "u", form.id, { accessMode: "public" });
+    await publishForm(other.id, "u", form.id, { accessMode: "public", consent: TEST_CONSENT_INPUT });
     await login(page);
     expect((await page.request.get(`/api/forms/${form.id}/qr?format=png`)).status()).toBe(404);
   } finally {

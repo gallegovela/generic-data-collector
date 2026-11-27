@@ -27,8 +27,31 @@ export const createSubmissionInputSchema = z.object({
   clientId: z.string().uuid(),
   answers: z.record(z.string(), z.unknown()),
   capturedAt: z.coerce.date(),
+  // Lo rellena quien llama a partir de la versión guardada en servidor.
+  consent: z
+    .object({
+      termsUrl: z.string().url(),
+      privacyUrl: z.string().url(),
+      formVersionNumber: z.number().int().positive(),
+    })
+    .optional(),
 });
 export type CreateSubmissionInput = z.input<typeof createSubmissionInputSchema>;
+
+/** Prueba de aceptación guardada en `Submission.consent`. Cubre: RF-SUB-13 */
+export const SubmissionConsentSchema = z.object({
+  acceptedAt: z.string().datetime(),
+  termsUrl: z.string().url(),
+  privacyUrl: z.string().url(),
+  formVersionNumber: z.number().int().positive(),
+});
+export type SubmissionConsent = z.infer<typeof SubmissionConsentSchema>;
+
+/** Null si es null o no es válido; nunca lanza. */
+export function parseSubmissionConsent(raw: unknown): SubmissionConsent | null {
+  const parsed = SubmissionConsentSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 /**
  * Clave de archivo propia (RF-STO-01: `org/<organizationId>/<tipo>/<uuid>.<ext>`):

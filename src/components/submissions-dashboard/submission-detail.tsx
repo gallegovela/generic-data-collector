@@ -1,6 +1,8 @@
 import type { Submission } from "@prisma/client";
 import { FormVersionSchema, getVisibleFields } from "@/lib/form-schema";
 import { buildFieldDisplayValue } from "@/lib/submissions-dashboard/field-display";
+import { parseSubmissionConsent } from "@/lib/submissions-dashboard/create-submission.schema";
+import { SubmissionConsentBlock } from "./submission-consent";
 import { SubmissionFieldValue } from "./submission-field-value";
 
 /** Ficha de una respuesta, solo lectura, con las etiquetas de su copia del esquema. Cubre: RF-SUB-08, CA-SUB-07 */
@@ -22,6 +24,7 @@ export function SubmissionDetail({ submission }: { submission: Submission }) {
           {submission.submittedByName ?? "Sin nombre"} · {submission.capturedAt.toLocaleString("es-ES")}
         </p>
       </div>
+      <SubmissionConsentBlock consent={parseSubmissionConsent(submission.consent)} />
       <dl className="space-y-4">
         {fields.map((field) => {
           const value = buildFieldDisplayValue(field, answers);
