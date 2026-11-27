@@ -71,6 +71,50 @@ describe("form.repository", () => {
     }
   });
 
+  // Cubre: CA-EDT-15
+  it("CA-EDT-15: responseCount cuenta las respuestas de la organización y no las de otra", async () => {
+    const org = await createOrganization({ name: "Organización recuento A (form.repository test)" });
+    const other = await createOrganization({ name: "Organización recuento B (form.repository test)" });
+    try {
+      const draft = { title: "x", fields: [] };
+      const withThree = await createForm(org.id, { name: "Con 3", draft });
+      const empty = await createForm(org.id, { name: "Con 0", draft });
+      const base = {
+        formTitle: "x",
+        formVersionSnapshot: {},
+        answers: {},
+        capturedAt: new Date(),
+      };
+      await prisma.submission.createMany({
+        data: [1, 2, 3].map((n) => ({
+          ...base,
+          organizationId: org.id,
+          formId: withThree.id,
+          clientId: `${withThree.id}-${n}`,
+        })),
+      });
+      // Respuestas de otra organización, incluso con el mismo formId, no cuentan.
+      await prisma.submission.createMany({
+        data: [1, 2].map((n) => ({
+          ...base,
+          organizationId: other.id,
+          formId: withThree.id,
+          clientId: `${withThree.id}-other-${n}`,
+        })),
+      });
+
+      const counts = Object.fromEntries(
+        (await listFormsByOrganization(org.id)).map((f) => [f.id, f.responseCount]),
+      );
+      expect(counts[withThree.id]).toBe(3);
+      expect(counts[empty.id]).toBe(0);
+    } finally {
+      await prisma.submission.deleteMany({ where: { organizationId: { in: [org.id, other.id] } } });
+      await prisma.form.deleteMany({ where: { organizationId: org.id } });
+      await prisma.organization.deleteMany({ where: { id: { in: [org.id, other.id] } } });
+    }
+  });
+
   // Cubre: CA-EDT-06
   it("un formulario archivado desaparece del listado", async () => {
     const f = await createForm(orgA.id, { name: "A1", draft: { title: "A1", fields: [] } });

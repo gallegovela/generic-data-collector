@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { getFillAction } from "@/lib/form-editor/fill-link";
 import {
   archiveFormAction,
   createFormAction,
@@ -155,10 +156,26 @@ function ArchiveDialog({
   );
 }
 
+function FillItem({ form }: { form: FormRow }) {
+  const action = getFillAction(form);
+  if (action.available) {
+    return (
+      <DropdownMenuItem render={<Link href={action.href} />}>Rellenar</DropdownMenuItem>
+    );
+  }
+  return (
+    <DropdownMenuItem disabled aria-disabled="true" className="flex-col items-start gap-0.5">
+      <span>Rellenar</span>
+      <span className="text-xs text-muted-foreground">{action.reason}</span>
+    </DropdownMenuItem>
+  );
+}
+
 /**
- * Listado de formularios con crear, duplicar y archivar.
+ * Listado de formularios con crear, rellenar, duplicar y archivar.
  *
- * Cubre: RF-EDT-01, RF-EDT-02, CA-EDT-04, CA-EDT-05, CA-EDT-06
+ * Cubre: RF-EDT-01, RF-EDT-02, RF-EDT-13, RF-EDT-14, CA-EDT-04, CA-EDT-05, CA-EDT-06,
+ * CA-EDT-13, CA-EDT-14, CA-EDT-15
  */
 export function FormsTable({ forms }: { forms: FormRow[] }) {
   const router = useRouter();
@@ -203,7 +220,15 @@ export function FormsTable({ forms }: { forms: FormRow[] }) {
                   <Badge variant="outline">{STATUS_LABELS[form.status] ?? form.status}</Badge>
                 </TableCell>
                 <TableCell>{form.publishedVersionLabel}</TableCell>
-                <TableCell>{form.responseCount}</TableCell>
+                <TableCell data-testid="response-count">
+                  {form.responseCount > 0 ? (
+                    <Link href={`/admin/forms/${form.id}/submissions`} className="hover:underline">
+                      {form.responseCount}
+                    </Link>
+                  ) : (
+                    form.responseCount
+                  )}
+                </TableCell>
                 <TableCell>{new Date(form.updatedAt).toLocaleString("es-ES")}</TableCell>
                 <TableCell>
                   <DropdownMenu>
@@ -217,6 +242,7 @@ export function FormsTable({ forms }: { forms: FormRow[] }) {
                       <DropdownMenuItem onClick={() => router.push(`/admin/forms/${form.id}`)}>
                         Abrir
                       </DropdownMenuItem>
+                      <FillItem form={form} />
                       <DropdownMenuItem onClick={() => setDuplicating(form)}>Duplicar</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setArchiving(form)}>Archivar</DropdownMenuItem>
                     </DropdownMenuContent>

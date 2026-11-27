@@ -19,6 +19,7 @@ vi.mock("./form.repository", () => ({
         id: f.id,
         name: f.name,
         status: "draft",
+        slug: null,
         publishedVersionLabel: "Sin publicar",
         responseCount: 0,
         updatedAt: new Date(),
