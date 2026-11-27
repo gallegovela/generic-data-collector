@@ -46,6 +46,7 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 | RF-SUB-10 | Should | Un panel de inicio (`/admin`) muestra el número de respuestas de hoy, de la semana y por formulario. |
 | RF-SUB-11 | Must | Cada respuesta guarda una copia inmutable del esquema (`FormVersion` de `form-schema`) con el que se rellenó, para mostrar siempre las etiquetas correctas aunque el formulario cambie después. |
 | RF-SUB-12 | Must | Cada respuesta indica la versión del formulario con la que se recogió (id y número, opcionales en respuestas anteriores a #27), el listado la muestra y se puede filtrar por ella. (#27) |
+| RF-SUB-13 | Must | La recepción respeta el límite `maxSubmissionsPerHour` del plan de la organización (ver [`admin-settings`](../admin-settings/README.md), RF-SET-11): una respuesta nueva que supera el límite se rechaza con `PlanLimitError` y no se guarda; un reenvío idempotente no consume cupo. (#40) |
 
 ## Requisitos no funcionales
 
@@ -81,6 +82,7 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 - **CA-SUB-12** — Dada una respuesta de la versión 1 enviada cuando ya existe la versión 2 con un campo obligatorio nuevo, cuando se envía con el esquema de la v1, entonces se acepta (se valida contra la v1). (#27)
 - **CA-SUB-13** — Dado un usuario de la organización A, cuando intenta guardar con la organización B, entonces se rechaza y no se guarda. (#27)
 - **CA-SUB-14** — Dadas respuestas de dos versiones del mismo formulario, cuando se abre el listado, entonces cada fila muestra su versión y el filtro por versión deja solo las de esa versión. (#27)
+- **CA-SUB-15** — Dado un plan con `maxSubmissionsPerHour` = 2, cuando se envían 3 respuestas distintas en la misma hora, entonces la tercera se rechaza con `PlanLimitError` y no se guarda; y el reenvío de la primera devuelve la guardada sin consumir cupo. Se detalla en CA-SET-02 y CA-SET-03. (#40)
 
 ## Supuestos y preguntas abiertas
 
@@ -90,6 +92,7 @@ Recibir y guardar las respuestas de forma fiable e idempotente, y mostrarlas al 
 
 ## Historial de cambios
 
+- 2026-11-27 — Issue #40: nuevo RF-SUB-13 y CA-SUB-15 (límite de recepciones por hora del plan; se prueba con el plan de `admin-settings`).
 - 2026-11-14 — Creación del módulo.
 - 2026-11-26 — Issue #27: recepción real (RF-SUB-01 a RF-SUB-04 pasan de "fuera de alcance" a incluidos, precisados); nuevo RF-SUB-12 (versión en cada respuesta, visible y filtrable); nuevas CA-SUB-10 a CA-SUB-14; `Submission` gana `formVersionId`, `formVersionNumber` y `submittedByUserId`. RF-SUB-09 sigue fuera (pertenece a `outputs`). CA-SUB-01 se cubre a nivel de servicio con CA-SUB-10 (el 200 HTTP lo da quien llama).
 - 2026-11-18 — Issue #7: alcance de la pieza (listado, ficha de detalle y panel de inicio, solo lectura, con datos de prueba); RF-SUB-05 y RF-SUB-08 precisados (paginación de 20, "sin ningún control para modificarlas"); nuevo RF-SUB-11 (copia inmutable del esquema en cada respuesta); nuevas CA-SUB-04 a CA-SUB-09; documentada la decisión de #1 sobre la futura edición de respuestas; `Submission.formId` sin clave foránea a `Form`/`FormVersion`; proveedor de mapas decidido (Leaflet/OpenStreetMap, dependencias nuevas pendientes de aprobación).

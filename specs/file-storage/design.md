@@ -317,7 +317,13 @@ Los tests del servicio usan `InMemoryStorageAdapter` y un repositorio con Prisma
 | 2 | #24 | Script de borrado de huérfanos y por organización (usa `findOrphanFiles`) | #25 |
 | 3 | `field-collector` | Subida pública anónima, reducción en dispositivo (RF-STO-05), `attachFilesToSubmission` | #25 |
 
+## Límite de tamaño por plan (#40)
+
+En `uploadFile`, tras el chequeo contra `STORAGE_MAX_UPLOAD_BYTES` y antes de `detectFileType`, se consulta `getEffectiveLimits(organizationId).maxFileBytes` (módulo `admin-settings`); si no es nulo y `bytes.byteLength` lo supera, `PayloadTooLargeError` con el mensaje «El archivo supera el tamaño máximo de tu plan (X MB).» (413, sin cambios en la ruta). Detalle en [`admin-settings/design.md`](../admin-settings/design.md#uploadfile-rf-set-12).
+
 ## Historial de cambios
+
+- 2026-11-27 — Límite de tamaño de archivo por plan (#40).
 
 - 2026-11-26 — Revisión del arquitecto: borrado del objeto sobrante en la carrera con extensiones distintas, notas de despliegue (nginx), HEIC y lectura por sesión (#25).
 - 2026-11-26 — Diseño inicial: adaptador S3, tabla `StoredFile`, rutas `POST`/`GET /api/files`, URLs firmadas (#25).
