@@ -3,7 +3,7 @@
 - **Requisitos:** [README.md](README.md)
 - **Plan de pruebas:** [test-plan.md](test-plan.md)
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #26 (diseño), padre #23
+- **Issues:** #26 (diseño), #38 (términos y condiciones), padre #23
 
 ## Resumen
 
@@ -400,11 +400,229 @@ Extremo a extremo (Playwright; helpers en `e2e/helpers/form-publishing.ts`: `log
 | `e2e/form-publishing-panel.spec.ts` | `CA-PUB-01`/`CA-PUB-02`: el admin abre el editor, pulsa Publicar, aparece el enlace y el QR (`<img>` con `naturalWidth > 0`); la ruta del QR devuelve `image/png` y `image/svg+xml`; abre `/f/<slug>` y ve `fill-placeholder`. `CA-PUB-06`: despublica, `/f/<slug>` muestra "Este formulario ya no acepta respuestas"; republica, el mismo enlace vuelve a funcionar. `CA-PUB-07`: con un borrador sin campos el panel muestra el mensaje de error y no aparece enlace. `RF-PUB-01`: si el autoguardado falla (se fuerza con `page.route` devolviendo 500 al guardado), `publish-button` queda deshabilitado y `publish-blocked` muestra "No se pudo guardar el borrador; reinténtalo antes de publicar". |
 | `e2e/form-publishing-api.spec.ts` | `CA-PUB-04`: con `request` sin cookies, `GET /api/public/forms/<slug>` da 401 en modo `registered` y 200 con `schema` en `public`; con la sesión del admin da 200 en `registered`; despublicado da 410; slug inexistente 404. `CA-PUB-05`: el QR de un formulario de otra organización con la sesión del admin demo da 404 (se crea la otra organización con `createOrganization`). |
 
+## Términos y condiciones en formularios públicos (#38)
+
+Añade la aceptación obligatoria de términos y condiciones a los formularios `public`. Cubre RF-PUB-12 a RF-PUB-15, RNF-PUB-04, CA-PUB-08 a CA-PUB-11 y, de otros módulos, RF-COL-21, RF-COL-22, RF-SUB-13, RF-GDPR-06 y RF-GDPR-07. **Depende de #33** (pantalla de relleno y `submitFill`, aún no fusionados cuando se escribe este diseño): el desarrollo parte de una rama que ya los contenga.
+
+### Decisiones
+
+1. **Dónde se configura: en cada publicación del formulario, no en la organización.** Dos enlaces `https` (términos y privacidad) más una declaración del administrador. Los guarda la `FormVersion` (`consent`, JSON nulable): así "versión del texto" = versión del formulario y no hace falta otra tabla ni otra pantalla de ajustes. El panel rellena los enlaces con los de la última publicación para no reescribirlos. Una configuración por organización queda como mejora posible (pregunta 1).
+2. **Enlaces, no texto.** FormIA no aloja el texto legal de cada cliente (RNF-PUB-04); se enlaza.
+3. **Dos aceptaciones distintas.** (a) El **administrador** declara al publicar (guardada en la versión: `declaredByUserId`, `declaredAt`); (b) la **persona que rellena** marca la casilla (guardada en cada `Submission`). Ver pregunta 2 sobre la interpretación de "casilla que tendrá que rellenar la empresa cliente".
+4. **Sin términos no se publica en `public`**, y un `public` ya publicado sin términos queda cerrado (RF-PUB-14) hasta republicar. Es la opción segura y no requiere cambios en #33: reutiliza el estado `closed` (410).
+5. **`accessMode` sigue sin crear versión**, pero `registered → public` solo se permite si la versión publicada ya lleva términos; si no, hay que "Publicar cambios" con ellos.
+6. La casilla y los avisos de la pantalla de relleno se definen aquí porque el recorrido cruza tres módulos; los criterios del lado de relleno (CA-COL-11, CA-COL-12) y de la respuesta (CA-SUB-15) se ejecutan en el plan de este módulo.
+
+### Modelo de datos (migración `add_consent_terms`)
+
+```prisma
+model FormVersion {
+  // ...campos existentes sin cambios...
+  consent Json? // StoredConsent; null si se publicó en modo registered o antes de #38. Inmutable con la versión.
+}
+
+model Submission {
+  // ...campos existentes sin cambios...
+  consent Json? // SubmissionConsent (ver submissions-dashboard); null en formularios registered y en respuestas anteriores a #38
+}
+```
+
+Migración solo `ALTER TABLE form_versions ADD COLUMN consent JSONB` y `ALTER TABLE submissions ADD COLUMN consent JSONB` (sin `NOT NULL` ni backfill). Efecto conocido: los formularios `public` ya publicados pasan a "cerrado" hasta republicarse con términos (RF-PUB-14); en el piloto no hay clientes reales (anotarlo en la PR).
+
+### Ficheros
+
+| Capa | Ruta | Cambio |
+| --- | --- | --- |
+| Modelo | `prisma/schema.prisma` + migración `add_consent_terms` | `FormVersion.consent`, `Submission.consent`. |
+| Validación | `src/lib/form-publishing/consent.schema.ts` (nuevo) | `HttpsUrlSchema`, `ConsentInputSchema`, `StoredConsentSchema`, tipos. |
+| Validación | `src/lib/form-publishing/form-publishing.schema.ts` (modificar) | `publishFormSchema` gana `consent` y la regla "público exige términos". |
+| Pruebas | `src/lib/form-publishing/consent.fixtures.ts` (nuevo) | `TEST_CONSENT_INPUT` para los tests y e2e que publican en `public`. |
+| Repositorio | `src/server/form-publishing/form-publishing.repository.ts` (modificar) | `createVersionAndPublish` guarda `consent`; `findFormBySlug` incluye `organization.name`; nueva `findLatestConsentVersion`. |
+| Servicio | `src/server/form-publishing/form-publishing.service.ts` (modificar) | `publishForm`, `setFormAccessMode`, `getPublishingState`, `getPublishedFormBySlug`, `getFormVersion`. |
+| Entrada | `src/server/form-publishing/form-publishing.actions.ts` (modificar) | `publishFormAction` traduce `ZodError` a `issues`. |
+| Entrada | `src/app/api/public/forms/[slug]/route.ts` (modificar) | Añade `consent` y `organizationName` al JSON. |
+| Interfaz | `src/components/form-publishing/publish-panel.tsx` (modificar) | Campos de términos y declaración. |
+| Interfaz | `src/components/form-publishing/consent-fields.tsx` (nuevo) | Subcomponente de esos campos. |
+| Relleno | `src/components/field-collector/consent-checkbox.tsx` (nuevo), `fill-form.tsx` (modificar, de #33) | Casilla, enlaces y aviso del encargado. |
+| Relleno | `src/lib/field-collector/fill.schema.ts`, `src/lib/field-collector/submit.ts`, `src/server/field-collector/fill.service.ts` (modificar, de #33) | `acceptedTerms` y comprobación en servidor. |
+| Respuestas | `src/lib/submissions-dashboard/create-submission.schema.ts`, `src/server/submissions/submission.service.ts`, `submission.repository.ts` (modificar) | Guardan `consent`. |
+| Respuestas | `src/components/submissions-dashboard/submission-consent.tsx` (nuevo), `submission-detail.tsx` (modificar) | Muestra la prueba en la ficha. |
+| Pruebas | `e2e/helpers/form-publishing.ts` (modificar) | `publishViaService(formId, accessMode)` pasa `TEST_CONSENT_INPUT` si el modo es `public`. |
+
+### Contratos
+
+```ts
+// src/lib/form-publishing/consent.schema.ts
+import { z } from "zod";
+
+export const MAX_CONSENT_URL_LENGTH = 2048;
+
+/** Texto recortado; https obligatorio; sin usuario ni contraseña; hasta 2048 caracteres.
+ *  Mensajes (es): "Introduce un enlace válido.", "El enlace debe empezar por https://.", "El enlace es demasiado largo." */
+export const HttpsUrlSchema: z.ZodType<string>;
+
+export const ConsentInputSchema = z.object({
+  termsUrl: HttpsUrlSchema,
+  privacyUrl: HttpsUrlSchema,
+  /** Casilla del administrador; debe ser exactamente `true`. Mensaje: "Debes confirmar la declaración para publicar." */
+  publisherDeclaration: z.literal(true),
+});
+export type ConsentInput = z.infer<typeof ConsentInputSchema>;
+
+/** Lo que guarda FormVersion.consent. */
+export const StoredConsentSchema = z.object({
+  termsUrl: HttpsUrlSchema,
+  privacyUrl: HttpsUrlSchema,
+  declaredByUserId: z.string().min(1),
+  declaredAt: z.string().datetime(), // hora del servidor al publicar
+});
+export type StoredConsent = z.infer<typeof StoredConsentSchema>;
+
+/** Lo que ve quien rellena (nunca declaredBy*). */
+export type PublicConsent = { termsUrl: string; privacyUrl: string };
+export function toPublicConsent(c: StoredConsent): PublicConsent;
+/** Parsea con StoredConsentSchema; null si es null o no es válido (nunca lanza). */
+export function parseStoredConsent(raw: unknown): StoredConsent | null;
+```
+
+```ts
+// src/lib/form-publishing/form-publishing.schema.ts (modificar)
+export const publishFormSchema = z
+  .object({ accessMode: AccessModeSchema, consent: ConsentInputSchema.optional() })
+  .superRefine((value, ctx) => {
+    if (value.accessMode === "public" && !value.consent) {
+      ctx.addIssue({ code: "custom", path: ["consent"], message: "Un formulario público necesita términos y condiciones." });
+    }
+  });
+// Con accessMode "registered", `consent` se ignora (no se guarda).
+// setAccessModeSchema no cambia.
+```
+
+```ts
+// Repositorio
+export function createVersionAndPublish(
+  organizationId: string, formId: string,
+  data: { schema: FormSchemaVersion; accessMode: AccessMode; slug: string; userId: string; consent: StoredConsent | null },
+): Promise<{ form: Form; version: FormVersion } | null>; // guarda FormVersion.consent = data.consent
+
+/** Última FormVersion de ese formulario con consent no nulo (para rellenar el panel). null si no hay. */
+export function findLatestConsentVersion(organizationId: string, formId: string): Promise<FormVersion | null>;
+
+export function findFormBySlug(slug: string): Promise<(Form & { organization: { name: string } }) | null>;
+```
+
+```ts
+// Servicio: tipos que cambian
+export type PublishedFormView = {
+  // ...campos existentes...
+  organizationName: string;
+  /** null en modo registered. En modo public siempre hay valor (si no, el formulario se trata como cerrado). */
+  consent: PublicConsent | null;
+};
+
+export type StoredFormVersion = {
+  // ...campos existentes...
+  consent: StoredConsent | null;
+};
+
+export type PublishingState = {
+  // ...campos existentes...
+  /** Términos de la versión publicada actual (null si no tiene). Decide si `registered → public` se puede hacer sin republicar. */
+  consent: PublicConsent | null;
+  /** Términos de la última versión que los tuvo (para rellenar el panel). */
+  suggestedConsent: PublicConsent | null;
+};
+```
+
+Cambios de comportamiento del servicio:
+
+- `publishForm`: tras validar el borrador (paso 2), si `accessMode === "public"` y `input.consent` falta o no pasa `ConsentInputSchema` → `PublishValidationError` con `issues` `{ path: "consent.termsUrl" | "consent.privacyUrl" | "consent.publisherDeclaration" | "consent", message }`; no se crea nada. Si pasa: `consent = { termsUrl, privacyUrl, declaredByUserId: userId, declaredAt: new Date().toISOString() }`. En `registered`, `consent = null`. El resto del flujo no cambia. Cubre RF-PUB-12, RF-PUB-13, CA-PUB-08, CA-PUB-09.
+- `setFormAccessMode(…, { accessMode: "public" })`: si `form.status === "published"` y la versión `publishedVersion` no tiene `consent` → `ValidationError("Para hacer público el formulario, publica de nuevo con los términos y condiciones.")` (la acción devuelve `{ ok:false, error }`). Si está en `draft`, se permite (se exigirá al publicar). `registered` se permite siempre. Cubre RF-PUB-14, CA-PUB-10.
+- `getPublishedFormBySlug`: tras leer la versión publicada, si `form.accessMode === "public"` y su `consent` es `null` → `{ state: "closed" }`. Si no, `view.consent = accessMode === "public" ? toPublicConsent(consent) : null` y `view.organizationName = form.organization.name`. Cubre RF-PUB-14, RF-PUB-15, CA-PUB-10, CA-PUB-11.
+- `getFormVersion` y `getPublishingState`: rellenan `consent` con `parseStoredConsent`; `suggestedConsent` sale de `findLatestConsentVersion`.
+
+`publishFormAction`: además de lo que ya hace, si `publishFormSchema` falla, devuelve `{ ok:false, error:"Revisa los términos y condiciones.", issues }` con los `path` de Zod unidos por `.` (por ejemplo `consent.termsUrl`).
+
+`GET /api/public/forms/[slug]` añade `consent` (`{ termsUrl, privacyUrl }` o `null`) y `organizationName`; sigue sin `organizationId`.
+
+### Interfaz del panel
+
+`ConsentFields` (`data-testid="consent-fields"`) se muestra solo con el selector en "Público con enlace":
+
+- `<Input>` "Enlace a los términos y condiciones" (`terms-url`) y "Enlace a la política de privacidad" (`privacy-url`), con `suggestedConsent` como valor inicial.
+- Casilla `publisher-declaration`: "Declaro que son los términos y la política de privacidad de mi organización, que soy responsable del tratamiento de los datos que se recojan con este formulario y que acepto el contrato de encargo de tratamiento con FormIA."
+- Los errores del servidor (`issues` con `consent.*`) se muestran bajo cada campo (`data-testid="consent-error-<campo>"`).
+- El botón Publicar queda deshabilitado en `public` mientras falte alguno de los tres datos (comprobación de cortesía; la autoridad es el servidor).
+- Selección `registered → public` en un formulario ya publicado: si `state.consent` es `null` solo cambia la selección local y se muestra "Para hacerlo público, publica de nuevo con los términos y condiciones" (no se llama a `setAccessModeAction`); si no es `null`, se llama como hasta ahora. Pasar a `registered` siempre llama a la acción.
+- `publishFormAction(formId, { accessMode, consent })` recibe los tres datos en `public`.
+
+### Lado de quien rellena (cambios sobre #33)
+
+Se detalla aquí para que el desarrollador no tome decisiones de diseño; los requisitos están en `field-collector`.
+
+- `page.tsx` de `/f/[slug]` pasa `form.consent` y `form.organizationName` a `FillForm`.
+- `ConsentCheckbox({ consent, organizationName, checked, onChange, error })` (`consent-checkbox.tsx`), solo cuando `consent !== null`:
+  - Casilla `data-testid="consent-checkbox"`, con texto "He leído y acepto los términos y condiciones y la política de privacidad", donde "términos y condiciones" y "política de privacidad" son enlaces `data-testid="terms-link"` y `data-testid="privacy-link"` (`target="_blank"`, `rel="noopener noreferrer"`).
+  - Aviso `data-testid="processor-notice"`: "Este formulario lo ofrece {organizationName}, responsable del tratamiento de tus datos. FormIA actúa como encargado del tratamiento."
+  - Error `data-testid="consent-error"`: "Debes aceptar los términos y condiciones para enviar."
+- `FillForm`: estado `acceptedTerms` (por defecto `false`; no forma parte de `answers`). Guardar con `consent !== null` y `!acceptedTerms` → muestra `consent-error`, enfoca la casilla y no llama a la red. `hasAnyAnswer` **no** cuenta la casilla (Descartar sin respuestas no pide confirmación solo por haberla marcado).
+- `submit(ctx, clientId, answers, files)` añade `acceptedTerms` en el cuerpo (`ctx.acceptedTerms: boolean`). `fillSubmissionBodySchema` gana `acceptedTerms: z.boolean().optional()`.
+- `submitFill`, tras el paso 2 (`getFormVersion`) y antes de llamar a `createSubmission`:
+  1. Si `form.accessMode === "public"`: la versión pedida (`version.consent`) tiene que existir; si no (versión anterior sin términos) → `ValidationError("Esta versión del formulario ya no está disponible. Vuelve a abrirlo.")` (400).
+  2. Si además `body.acceptedTerms !== true` → `SubmissionValidationError([{ fieldId: "_consent", message: "Debes aceptar los términos y condiciones para enviar." }])` (400 con `fieldErrors`).
+  3. Se pasa a `createSubmission` `consent: { termsUrl, privacyUrl, formVersionNumber: version.version }` (los de **la versión pedida**, nunca los del cuerpo).
+  4. En modo `registered` no se exige ni se guarda nada (`consent` indefinido).
+- La limitación de tasa y el honeypot de #33 se aplican antes, sin cambios. El honeypot lleno sigue devolviendo "éxito" sin guardar.
+- Registro (logs): nada nuevo; no se registran enlaces ni IP.
+
+### Casilla del administrador y contrato de encargo
+
+El texto de la declaración está en el panel y la declaración queda en `FormVersion.consent` (quién, cuándo). El contrato de encargo y la lista de subencargados son documentación de `privacy-gdpr` (`processor-role.md`); esta pieza no crea ninguna página legal nueva (pregunta 3).
+
+### Errores
+
+| Situación | Error | Server action | HTTP |
+| --- | --- | --- | --- |
+| Publicar `public` sin términos, enlace inválido o sin declaración | `PublishValidationError` (`issues` con `consent.*`) | `{ ok:false, error, issues }` | — |
+| `registered → public` sin términos en la versión | `ValidationError` | `{ ok:false, error }` | — |
+| Formulario `public` sin términos en la versión publicada | `{ state: "closed" }` | — | 410 |
+| Guardar en `public` sin `acceptedTerms: true` | `SubmissionValidationError` (`fieldId "_consent"`) | — | 400 |
+| Guardar en `public` con una versión sin términos | `ValidationError` | — | 400 |
+
+### Seguridad y privacidad
+
+- Los enlaces los escribe un administrador y se muestran a personas anónimas: solo `https`, sin credenciales, con `rel="noopener noreferrer"`; nunca se insertan como HTML. `javascript:` y `data:` se rechazan por el esquema.
+- La prueba de aceptación se toma **de la versión guardada en servidor**, nunca de lo que envía el cliente; el cliente solo envía un booleano.
+- El `declaredByUserId` no sale en ninguna lectura pública.
+- `consent` contiene enlaces y fechas, no datos personales; las respuestas siguen sin registrarse en logs.
+- Relación con el housekeeper (#24) y `privacy-gdpr`: `Submission.consent` se borra junto con la respuesta (caducidad, borrado de respuesta o de organización) y entra en la exportación JSON completa (RF-GDPR-01). No se conserva prueba de aceptación sin su respuesta (pregunta 4).
+
+### Tests
+
+Nombre de cada test: incluye el identificador del criterio.
+
+| Criterio | Tipo | Fichero |
+| --- | --- | --- |
+| CA-PUB-08 | Vitest (unitario) | `src/lib/form-publishing/consent.schema.test.ts` — `HttpsUrlSchema` rechaza `http://`, `javascript:alert(1)`, `data:`, `https://user:pass@x.com`, vacío y más de 2048 caracteres; acepta `https://example.com/t?x=1`. `ConsentInputSchema` rechaza `publisherDeclaration: false`. `publishFormSchema`: `public` sin `consent` falla con path `consent`; `registered` sin `consent` pasa. |
+| CA-PUB-08 | Vitest (integración) | `form-publishing.service.test.ts` — `describe("CA-PUB-08")`: `public` sin consent / con enlace `http` / sin declaración → `PublishValidationError`, 0 `FormVersion` nuevas; `registered` sin consent → publica y `FormVersion.consent` es `null`; `public` válido → `consent` guardado con `declaredByUserId` y `declaredAt`. |
+| CA-PUB-09 | Vitest (integración) | idem — `describe("CA-PUB-09")`: v1 con enlaces A, v2 con enlaces B → `getFormVersion(v1.id).consent.termsUrl` es A y el de v2 es B; `getPublishingState.suggestedConsent` devuelve B. |
+| CA-PUB-10 | Vitest (integración) | idem — `describe("CA-PUB-10")`: publicado `registered` → `setFormAccessMode("public")` lanza `ValidationError`; borrador → se permite; formulario `public` con `FormVersion.consent = null` (insertado directamente) → `getPublishedFormBySlug` devuelve `{ state: "closed" }`. |
+| CA-PUB-11 | Vitest (integración) | idem — `describe("CA-PUB-11")`: `getPublishedFormBySlug` en `public` devuelve `consent` con los dos enlaces y `organizationName`, sin `declaredByUserId`; en `registered`, `consent` es `null`. |
+| CA-PUB-08, CA-PUB-11 | Playwright | `e2e/form-publishing-consent.spec.ts` — el panel: con "Público con enlace" aparecen `consent-fields`; publicar con la declaración sin marcar muestra error; con datos válidos aparece el enlace; `GET /api/public/forms/<slug>` sin cookies trae `consent` y `organizationName` y no contiene `declaredBy`. |
+| CA-PUB-10 | Playwright | idem — formulario publicado en `registered`: elegir "Público con enlace" muestra el aviso y **no** cambia el modo en el servidor hasta publicar con términos. |
+| CA-COL-11 | Playwright | `e2e/field-collector-consent.spec.ts` — formulario `public` con términos (`publishViaService`): anónimo sin cookies abre `/f/<slug>`, rellena un campo de texto, pulsa Guardar sin marcar `consent-checkbox` → aparece `consent-error` y no hay `Submission` (consulta por servicio); marca la casilla y guarda → `save-success`/`/thanks` y existe 1 `Submission` con `consent` no nulo. En un formulario `registered` con sesión no existe `consent-checkbox`. |
+| CA-GDPR-03 | Playwright | idem — en `/f/<slug>` público, `processor-notice` contiene el nombre de la organización y "FormIA actúa como encargado del tratamiento"; `terms-link` y `privacy-link` tienen el `href` configurado, `target="_blank"` y `rel` con `noopener`. |
+| CA-COL-12 | Vitest (integración) | `src/server/field-collector/fill.service.test.ts` — `describe("CA-COL-12")`: `submitFill` en `public` sin `acceptedTerms` o con `false` → `SubmissionValidationError` con `fieldId "_consent"` y 0 filas; con una versión sin términos → `ValidationError`; con `true` → fila con `consent` cuyos enlaces son los de la versión del servidor aunque el cuerpo traiga otros campos; en `registered` no se exige y `consent` es `null`. |
+| CA-COL-12 | Playwright | idem (`e2e/field-collector-consent.spec.ts`) — `POST /api/public/forms/<slug>/submissions` sin cookies y sin `acceptedTerms` responde 400 y no crea fila; con `acceptedTerms: true` responde 201. |
+
+Los tests de #26 que publican en `public` pasan a usar `TEST_CONSENT_INPUT` (el desarrollador los actualiza; no cambian de intención).
+
 ## Tareas de desarrollo
 
-Ver el plan de acción del issue #26 (orden de implementación).
+Ver el plan de acción del issue #26 (orden de implementación) y, para los términos y condiciones, el del issue #38.
 
 ## Historial de cambios
 
+- 2026-11-27 — Issue #38: sección "Términos y condiciones en formularios públicos" (`FormVersion.consent`, `Submission.consent`, validación, panel, lado de relleno, errores, tests).
 - 2026-11-26 — Revisión del arquitecto (#26): `canPublish` también bloquea `phase === "error"`; texto del 403 de `/f/[slug]`; slug asignado dentro de la transacción; `runtime = "nodejs"` en el QR y dependencia `qrcode` aprobada.
 - 2026-11-26 — Diseño inicial (#26): `FormVersion`, columnas `slug`, `accessMode` y `publishedVersion` en `Form`, servicio de publicación y contrato de lectura, endpoint público y QR, `PublishPanel`, página `/f/[slug]` mínima y cambio del listado de `form-editor`.

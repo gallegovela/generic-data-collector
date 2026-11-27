@@ -491,6 +491,34 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
 | CA-SUB-14 | Vitest | `src/server/submissions/submission.repository.test.ts` — `describe("CA-SUB-14")`: listado con `formVersionNumber` filtra; `listFormVersionNumbers` devuelve `[1, 2]` sin NULL ni de otra organización. |
 | CA-SUB-14 | Playwright | `e2e/submissions-dashboard-listing.spec.ts` (ampliar) — columna "Versión" y filtro `?version=`. |
 
+## Prueba de aceptación de términos (#38)
+
+Cubre RF-SUB-13 y CA-SUB-15. La decisión y el recorrido completo están en [form-publishing/design.md](../form-publishing/design.md#términos-y-condiciones-en-formularios-públicos-38); aquí solo lo que cambia en este módulo.
+
+- **Modelo:** `Submission.consent Json?` (migración `add_consent_terms`, compartida con `FormVersion.consent`). Nulo en `registered` y en respuestas anteriores.
+- **Tipo guardado:**
+
+```ts
+// src/lib/submissions-dashboard/create-submission.schema.ts (modificar)
+export const SubmissionConsentSchema = z.object({
+  acceptedAt: z.string().datetime(), // hora del servidor al insertar
+  termsUrl: z.string().url(),
+  privacyUrl: z.string().url(),
+  formVersionNumber: z.number().int().positive(),
+});
+export type SubmissionConsent = z.infer<typeof SubmissionConsentSchema>;
+export function parseSubmissionConsent(raw: unknown): SubmissionConsent | null; // nunca lanza
+
+// createSubmissionInputSchema gana (opcional; lo rellena quien llama a partir de la versión guardada en servidor):
+//   consent: z.object({ termsUrl: z.string().url(), privacyUrl: z.string().url(), formVersionNumber: z.number().int().positive() }).optional()
+```
+
+- **Servicio** (`createSubmission`): en el paso 8, si `input.consent` existe, `insertSubmission` recibe `consent: { ...input.consent, acceptedAt: new Date().toISOString() }`; si no, `null`. En la rama idempotente (paso 4) no se toca: devuelve la fila existente con su `consent` original. El servicio no decide cuándo se exige la aceptación (lo hace quien llama, `submitFill`).
+- **Repositorio:** `insertSubmission` acepta `consent: SubmissionConsent | null`. `SubmissionListItem` no cambia (el listado no muestra el consentimiento).
+- **Interfaz:** `src/components/submissions-dashboard/submission-consent.tsx` (nuevo): `SubmissionConsentBlock({ consent: SubmissionConsent | null })`. Con `null` no pinta nada. Si no, `data-testid="submission-consent"` con «Términos aceptados el <fecha y hora local> (versión <n> del formulario)» y enlaces `terms-link` y `privacy-link` (`target="_blank"`, `rel="noopener noreferrer"`). `submission-detail.tsx` lo monta bajo los datos de cabecera, solo lectura.
+- **Tests:** `submission.service.test.ts` — `describe("CA-SUB-15")`: con `consent` en la entrada se guarda con `acceptedAt` puesto por el servidor (distinto de `capturedAt`); sin `consent` queda `null`; mismo `clientId` dos veces → `acceptedAt` idéntico (no se sobrescribe). `src/components/submissions-dashboard/submission-consent.test.tsx` (si el proyecto ya tiene tests de componentes; si no, solo Playwright) y `e2e/submissions-dashboard-detail.spec.ts` (ampliar): ficha con `consent` muestra `submission-consent` y ambos enlaces; ficha sin `consent` no. El fixture `prisma/fixtures/submissions-dashboard.fixtures.ts` gana una función para crear una respuesta con `consent`.
+- **Salidas:** CSV y Excel (`outputs`) no cambian en #38 (pregunta 5 del issue). `Submission.consent` forma parte de la fila y por tanto de la exportación completa de privacy-gdpr.
+
 ## Tareas de desarrollo
 
 | Orden | Issue | Tarea | Depende de |
@@ -519,6 +547,7 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
 
 ## Historial de cambios
 
+- 2026-11-27 — Issue #38: sección «Prueba de aceptación de términos» (`Submission.consent`, `SubmissionConsentSchema`, bloque en la ficha).
 - 2026-11-18 — Diseño inicial (#7): `Submission` sin clave foránea a `Form`/`FormVersion` (identificador lógico `formId` + copia inmutable del esquema en `formVersionSnapshot`, RF-SUB-11); listado paginado y filtrable, ficha de detalle solo lectura y panel de inicio, todos como Server Components sin ninguna mutación; mapa con `leaflet`/`react-leaflet` (dependencia nueva, pendiente de aprobación); marcador de posición para fotos/firma mientras no exista `file-storage`; RNF-SUB-02 fuera del plan de pruebas automático (riesgo anotado).
 - 2026-11-26 — Issue #28 (ver `specs/outputs/design.md`): `Submission.formVersionNumber Int?` (nullable); `listSubmissionsByForm` pasa a usar `buildSubmissionWhere` y `listSubmissions` a usar `toListFilters`, sin cambiar su comportamiento; nuevas `countSubmissionsOfForm` y `listSubmissionsForExport`; el listado muestra los enlaces de exportación.
 - 2026-11-26 — Diseño de la recepción (#27): servicio `createSubmission` idempotente validado contra la versión indicada, actor `user`/`anonymous`, límite de 256 KiB y validación de claves de archivo propias, campos `formVersionId`, `formVersionNumber` y `submittedByUserId` (nulables, sin clave foránea), versión visible y filtrable en el listado. Sin route handler en #27. Las tareas 17 a 21 son de #27 (las 1 a 16 son de #7 y ya están hechas).

@@ -3,7 +3,7 @@
 - **Requisitos:** [README.md](README.md)
 - **Diseño:** [design.md](design.md)
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
-- **Issues:** #26
+- **Issues:** #26, #38
 
 Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-26` de la pull request (con la última rama principal fusionada) y **antes de fusionarla**. Todo se ejecuta en el entorno de pruebas en contenedores (ver "Pruebas en contenedores" en `specs/platform/design.md`): cada comando va dentro del contenedor `tests` con `npm run test:stack:run -- <comando>`, y los servicios se llaman por su nombre (`web`, `postgres`), nunca `localhost`. Este módulo necesita PostgreSQL y la app; no usa MinIO ni Mailpit.
 
@@ -133,8 +133,91 @@ npm run test:stack:run -- npm run db:seed        # usuario admin y organización
   ```
 - **Resultado esperado:** `migrate status` termina con código 0 y contiene "Database schema is up to date"; el segundo comando pasa (etiquetas "Sin publicar", "v<n>" y "Despublicado (última v<n>)").
 
+### PP-PUB-10 — Un formulario público no se publica sin términos y declaración (#38)
+
+- **Cubre:** CA-PUB-08, RF-PUB-12, RNF-PUB-04
+- **Tipo:** automático (Vitest, con PostgreSQL)
+- **Precondiciones:** migraciones aplicadas.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx vitest run src/lib/form-publishing/consent.schema.test.ts src/server/form-publishing/form-publishing.service.test.ts -t "CA-PUB-08"
+  ```
+- **Resultado esperado:** código de salida 0 y al menos 6 tests ejecutados (si Vitest informa de 0 tests, el caso es ❌). Publicar en `public` sin `consent`, con enlace `http://`, `javascript:` o con credenciales, o con `publisherDeclaration` distinto de `true` lanza `PublishValidationError` (o falla el esquema) con la ruta `consent.*` correspondiente y no crea ninguna `FormVersion`; en `registered` publica sin términos y `FormVersion.consent` es `null`; en `public` válido guarda `termsUrl`, `privacyUrl`, `declaredByUserId` y `declaredAt`.
+
+### PP-PUB-11 — Los términos viajan con cada versión y el cambio a público exige republicar (#38)
+
+- **Cubre:** CA-PUB-09, CA-PUB-10, RF-PUB-13, RF-PUB-14
+- **Tipo:** automático (Vitest con PostgreSQL + Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx vitest run src/server/form-publishing/form-publishing.service.test.ts -t "CA-PUB-09|CA-PUB-10"
+  npm run test:stack:run -- npx playwright test e2e/form-publishing-consent.spec.ts -g "CA-PUB-10"
+  ```
+- **Resultado esperado:** ambos comandos con código de salida 0 y al menos 1 test cada uno. v1 conserva los enlaces A y v2 los B; `suggestedConsent` devuelve B; `setFormAccessMode("public")` sobre un formulario publicado en `registered` lanza `ValidationError` y el modo sigue siendo `registered`; sobre un borrador se permite; un formulario `public` sin términos en su versión responde `{ state: "closed" }`; en el panel, elegir "Público con enlace" en un formulario publicado en `registered` muestra el aviso y no cambia el modo hasta publicar con términos.
+
+### PP-PUB-12 — La lectura para rellenar incluye los términos y el responsable (#38)
+
+- **Cubre:** CA-PUB-11, RF-PUB-15
+- **Tipo:** automático (Vitest con PostgreSQL + Playwright con peticiones HTTP)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx vitest run src/server/form-publishing/form-publishing.service.test.ts -t "CA-PUB-11"
+  npm run test:stack:run -- npx playwright test e2e/form-publishing-consent.spec.ts -g "CA-PUB-11"
+  ```
+- **Resultado esperado:** ambos con código de salida 0. `GET http://web:3000/api/public/forms/<slug>` sin cookies en un formulario `public` devuelve 200 con `consent.termsUrl`, `consent.privacyUrl` y `organizationName`, y el cuerpo no contiene `declaredBy` ni `organizationId`; en `registered` (con sesión) `consent` es `null`.
+
+### PP-PUB-13 — Casilla obligatoria en la pantalla de relleno (#38)
+
+- **Cubre:** CA-COL-11, RF-COL-21
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** seed aplicado; rama con #33 integrada (pantalla de relleno).
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-COL-11"
+  ```
+- **Resultado esperado:** código de salida 0 y al menos 1 test. Sin marcar la casilla, Guardar muestra `consent-error` y no se crea ninguna `Submission`; marcada, se guarda y la `Submission` tiene `consent` no nulo; en un formulario `registered` no hay `consent-checkbox`.
+
+### PP-PUB-14 — Aviso del responsable y enlaces en el formulario público (#38)
+
+- **Cubre:** CA-GDPR-03, RF-GDPR-06
+- **Tipo:** automático (Playwright)
+- **Precondiciones:** igual que PP-PUB-13.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-GDPR-03"
+  ```
+- **Resultado esperado:** código de salida 0 y al menos 1 test. `processor-notice` contiene el nombre de la organización y «FormIA actúa como encargado del tratamiento»; `terms-link` y `privacy-link` tienen los `href` configurados, `target="_blank"` y `rel` que incluye `noopener`.
+
+### PP-PUB-15 — El servidor exige la aceptación aunque se salte la interfaz (#38)
+
+- **Cubre:** CA-COL-12, RF-COL-22
+- **Tipo:** automático (Vitest con PostgreSQL + Playwright con peticiones HTTP)
+- **Precondiciones:** igual que PP-PUB-13.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx vitest run src/server/field-collector/fill.service.test.ts -t "CA-COL-12"
+  npm run test:stack:run -- npx playwright test e2e/field-collector-consent.spec.ts -g "CA-COL-12"
+  ```
+- **Resultado esperado:** ambos con código de salida 0 y al menos 1 test cada uno. En `public`, el guardado sin `acceptedTerms: true` responde 400 (`fieldErrors` con `_consent`) y no crea fila; con una versión sin términos responde 400; con `true` responde 201 y la fila guarda los enlaces de la versión del servidor; en `registered` no se exige.
+
+### PP-PUB-16 — La migración de términos es compatible con los datos existentes (#38)
+
+- **Cubre:** RF-PUB-13, RF-SUB-13 (compatibilidad)
+- **Tipo:** comando
+- **Precondiciones:** Preparación ejecutada.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx prisma migrate status
+  npm run test:stack:run -- sh -c "psql \"\$DATABASE_URL\" -c '\\d form_versions' -c '\\d submissions' | grep -E 'consent'"
+  ```
+- **Resultado esperado:** `migrate status` termina con código 0 e informa "Database schema is up to date"; el `grep` muestra dos líneas `consent | jsonb` sin `not null`. (Si `psql` no está disponible en el contenedor, el ejecutor lo anota como ⏭️ y comprueba lo mismo con `npx prisma db pull --print`.)
+
 ## Comprobaciones manuales
 
+- [ ] El bloque de términos del panel de publicar y la casilla con el aviso del responsable se ven ordenados en móvil (360 px) y en ordenador; los enlaces se distinguen y se pueden tocar con una mano. — Cubre: RF-COL-21, RF-PUB-12
+- [ ] Revisar con una persona con formación legal el texto de la declaración del administrador y el aviso del responsable (no es asesoramiento jurídico). — Cubre: RF-GDPR-06, RF-GDPR-07
 - [ ] Escanear con un móvil real el QR descargado (PNG y SVG) y comprobar que abre el formulario. — Cubre: CA-PUB-02
 - [ ] El panel de publicar se ve ordenado en pantalla de ordenador y no rompe la barra superior del editor en una ventana estrecha. — Cubre: RF-PUB-05, RF-PUB-09
 - [ ] "Copiar enlace" copia al portapapeles el enlace mostrado. — Cubre: RF-PUB-04
@@ -148,3 +231,4 @@ npm run test:stack:down     # en testPR y module-test lo hace el workflow
 ## Historial de cambios
 
 - 2026-11-26 — Plan de pruebas inicial (#26)
+- 2026-11-27 — #38: PP-PUB-10 a PP-PUB-16 (términos obligatorios, versión, lectura, casilla en la pantalla de relleno, aviso del responsable, exigencia en servidor y migración) y dos comprobaciones manuales.

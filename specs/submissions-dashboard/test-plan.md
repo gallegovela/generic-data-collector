@@ -244,6 +244,19 @@ npm run db:migrate
   ```
 - **Resultado esperado:** `migrate status` informa "Database schema is up to date"; el `grep` muestra las tres columnas sin `not null`. (Si el nombre de la tabla o la disponibilidad de `psql` en el entorno difieren, el ejecutor lo adapta y lo anota.)
 
+### PP-SUB-20 — Prueba de aceptación de términos en la respuesta y en la ficha (#38)
+
+- **Cubre:** CA-SUB-15, RF-SUB-13, CA-GDPR-04
+- **Tipo:** automático (Vitest con PostgreSQL + Playwright) y comando
+- **Precondiciones:** Preparación ejecutada; para Playwright, igual que PP-SUB-11.
+- **Pasos:**
+  ```bash
+  npm run test:stack:run -- npx vitest run src/server/submissions/submission.service.test.ts -t "CA-SUB-15"
+  npm run test:stack:run -- npx playwright test e2e/submissions-dashboard-detail.spec.ts -g "CA-SUB-15"
+  npm run test:stack:run -- sh -c "psql \"\$DATABASE_URL\" -c '\\d submissions' | grep consent"
+  ```
+- **Resultado esperado:** los tres con código de salida 0 y al menos 1 test en los dos primeros. Con `consent` en la entrada se guarda con `acceptedAt` puesto por el servidor; sin él queda `null`; un reenvío con el mismo `clientId` no cambia `acceptedAt`; la ficha de una respuesta con `consent` muestra `submission-consent` con la fecha, la versión y los enlaces `terms-link` y `privacy-link`, y la de una sin él no muestra el bloque; la columna `consent` de `submissions` existe y es `jsonb` nulable (⏭️ con motivo si `psql` no está disponible).
+
 ## Comprobaciones manuales
 
 - [ ] El mapa, las miniaturas de fotos y la firma se ven bien en móvil (360 px) y en escritorio — Cubre: RF-SUB-08, CLAUDE.md "móvil primero".
@@ -260,4 +273,5 @@ docker compose down -v --remove-orphans
 
 - 2026-11-18 — Plan de pruebas inicial (#7): PP-SUB-01 a PP-SUB-12 para el aislamiento por organización, la copia inmutable del esquema (RF-SUB-11), la paginación (CA-SUB-04), los filtros (CA-SUB-02, CA-SUB-08), la búsqueda de texto libre (CA-SUB-05), las estadísticas del panel de inicio (CA-SUB-06), el renderizado por tipo de campo, el mapa GPS (CA-SUB-03), fotos/firma y el carácter de solo lectura (CA-SUB-09, CA-SUB-07). RNF-SUB-02 y el aspecto visual quedan en comprobaciones manuales. CA-SUB-01 queda fuera (recepción real, no cubierta por #7).
 - 2026-11-26 — #27: PP-SUB-13 a PP-SUB-19 para idempotencia (CA-SUB-10), validación por campo (CA-SUB-11), validación contra la versión indicada (CA-SUB-12), aislamiento de organización al guardar (CA-SUB-13), límites, claves de archivo y autor, versión en el listado (CA-SUB-14) y compatibilidad de la migración.
+- 2026-11-27 — #38: PP-SUB-20 para la prueba de aceptación de términos (CA-SUB-15, CA-GDPR-04).
 - 2026-11-18 — Revisión del arquitecto (#7, cambio bloqueante): PP-SUB-01 ampliado para que el aislamiento por `organizationId` cubra también `findFilterableFields`, `getSubmissionStats` y la búsqueda de texto (`findSubmissionIdsByText`), no solo `findSubmissionById`/`listSubmissionsByForm`.
