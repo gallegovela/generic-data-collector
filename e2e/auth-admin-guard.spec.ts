@@ -9,16 +9,16 @@ async function login(page: Page, email: string): Promise<void> {
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Contraseña").fill(PASSWORD);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await page.waitForURL(/\/(admin|collect)/);
+  await page.waitForURL(/\/(admin|forms)/);
 }
 
 // Cubre: RF-AUT-06, CA-AUT-02
-test("un collector no entra en /admin: se le redirige a /collect", async ({ page }) => {
+test("un collector no entra en /admin: se le redirige a /forms", async ({ page }) => {
   await login(page, COLLECTOR_EMAIL);
 
   await page.goto("/admin");
 
-  await expect(page).toHaveURL(/\/collect$/);
+  await expect(page).toHaveURL(/\/forms$/);
 });
 
 // Cubre: RF-AUT-06, CA-AUT-02

@@ -92,7 +92,7 @@ test("CA-OUT-06: 401 sin sesión, 403 como collector y 404 de otra organización
   await collectorPage.getByLabel("Email").fill("collector@demo.formia.local");
   await collectorPage.getByLabel("Contraseña").fill("Demo1234!");
   await collectorPage.getByRole("button", { name: "Entrar" }).click();
-  // No se espera a la página /collect: basta con que la sesión exista.
+  // No se espera a la página /forms: basta con que la sesión exista.
   await expect
     .poll(async () => (await collectorPage.request.get(url(formId, "format=csv"))).status(), { timeout: 15_000 })
     .toBe(403);

@@ -52,7 +52,7 @@ export async function requireSession(options?: { role?: Role }): Promise<Current
 
 /**
  * Para Server Components (páginas/layouts): igual que requireSession
- * pero en vez de lanzar, hace redirect("/login") o redirect("/collect")
+ * pero en vez de lanzar, hace redirect("/login") o redirect("/forms")
  * (admin requerido y el usuario es collector).
  *
  * Cubre: RF-AUT-06, CA-AUT-02.
@@ -65,7 +65,7 @@ export async function requireAdminPage(): Promise<CurrentUser> {
   }
 
   if (user.role !== "admin") {
-    redirect("/collect");
+    redirect("/forms");
   }
 
   return user;

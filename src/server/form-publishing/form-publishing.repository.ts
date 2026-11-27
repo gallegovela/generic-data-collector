@@ -128,3 +128,22 @@ export function findFormBySlug(slug: string): Promise<Form | null> {
 export function findVersionById(versionId: string): Promise<FormVersion | null> {
   return prisma.formVersion.findUnique({ where: { id: versionId } });
 }
+
+export type PublishedFormRow = { id: string; name: string; slug: string };
+
+/**
+ * Formularios publicados (no archivados, con slug) de la organización,
+ * ordenados por nombre. Siempre filtra por `organizationId`.
+ *
+ * Cubre: RF-AUT-09, CA-AUT-14
+ */
+export async function listPublishedForms(organizationId: string): Promise<PublishedFormRow[]> {
+  const rows = await prisma.form.findMany({
+    where: { organizationId, status: "published", archivedAt: null, slug: { not: null } },
+    select: { id: true, name: true, slug: true },
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+  });
+  return rows.flatMap((row) =>
+    row.slug === null ? [] : [{ id: row.id, name: row.name, slug: row.slug }],
+  );
+}
