@@ -309,7 +309,7 @@ sequenceDiagram
 | Error de dominio | HTTP / página | Mensaje en la interfaz |
 | --- | --- | --- |
 | `UnauthorizedError` (de `requireSession`) | — | Redirige a `/login` (vía `requireAdminPage`). |
-| `ForbiddenError` | — | Redirige a `/collect` (rol `collector` en `/admin`). |
+| `ForbiddenError` | — | Redirige a `/forms` (rol `collector` en `/admin`). |
 | `NotFoundError` (respuesta inexistente o de otra organización) | 404 / `notFound()` | "No se ha encontrado la respuesta." |
 | Formulario sin respuestas todavía (`formId` sin ninguna fila) | 200 | No es un error: listado vacío, "No hay respuestas para este formulario todavía.", sin filtros de campo disponibles. |
 
@@ -518,6 +518,8 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
 | 21 | #27 | Tabla y barra de filtros con versión; ampliar el e2e del listado | 20 |
 
 ## Historial de cambios
+
+- 2026-11-27 — Solo texto (#39): la redirección del `collector` desde `/admin` pasa de `/collect` (retirada) a `/forms`.
 
 - 2026-11-18 — Diseño inicial (#7): `Submission` sin clave foránea a `Form`/`FormVersion` (identificador lógico `formId` + copia inmutable del esquema en `formVersionSnapshot`, RF-SUB-11); listado paginado y filtrable, ficha de detalle solo lectura y panel de inicio, todos como Server Components sin ninguna mutación; mapa con `leaflet`/`react-leaflet` (dependencia nueva, pendiente de aprobación); marcador de posición para fotos/firma mientras no exista `file-storage`; RNF-SUB-02 fuera del plan de pruebas automático (riesgo anotado).
 - 2026-11-26 — Issue #28 (ver `specs/outputs/design.md`): `Submission.formVersionNumber Int?` (nullable); `listSubmissionsByForm` pasa a usar `buildSubmissionWhere` y `listSubmissions` a usar `toListFilters`, sin cambiar su comportamiento; nuevas `countSubmissionsOfForm` y `listSubmissionsForExport`; el listado muestra los enlaces de exportación.

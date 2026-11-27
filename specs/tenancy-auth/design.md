@@ -2,7 +2,7 @@
 
 - **Requisitos:** [README.md](README.md)
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #4 (diseño), padre #1; #20 (límite de login y trazabilidad), padre #18
+- **Issues:** #4 (diseño), padre #1; #20 (límite de login y trazabilidad), padre #18; #39 (retirar `/collect`, listado `/forms`), padre #23
 
 ## Resumen
 
@@ -13,11 +13,11 @@ Se usa Auth.js v5 (`next-auth`) con estrategia de sesión **JWT** (cookie `httpO
 
 `Organization` y `User` (con `role: admin | collector`) son las primeras entidades de negocio del proyecto (primera migración real tras el esqueleto vacío de `platform`). No hay alta de organizaciones desde la interfaz en el piloto: las crea el seed; los usuarios nuevos entran siempre por invitación (`Invitation`) o ya existen en el seed.
 
-Un único módulo de servidor, `src/server/auth/session.ts`, expone `requireSession`/`getCurrentOrg`: todos los demás módulos lo importan para no repetir el filtro por `organizationId` ni la comprobación de rol (RNF-AUT-02). Un `middleware.ts` en la raíz protege `/admin/**` (solo `admin`) y `/collect/**` (cualquier sesión); las rutas `/f/**` (relleno público de formularios, que añadirá `field-collector`/`form-publishing`) no están en el `matcher` del middleware, así que nunca pasan por el guardián de sesión — es la parte de infraestructura de RF-AUT-08.
+Un único módulo de servidor, `src/server/auth/session.ts`, expone `requireSession`/`getCurrentOrg`: todos los demás módulos lo importan para no repetir el filtro por `organizationId` ni la comprobación de rol (RNF-AUT-02). Un `middleware.ts` en la raíz protege `/admin/**` (solo `admin`) y `/forms/**` (cualquier sesión; antes `/collect/**`, retirada en #39); las rutas `/f/**` (relleno público de formularios, que añadirá `field-collector`/`form-publishing`) no están en el `matcher` del middleware, así que nunca pasan por el guardián de sesión — es la parte de infraestructura de RF-AUT-08.
 
 El envío de email (enlace mágico e invitaciones) usa un adaptador SMTP genérico (`nodemailer`, contra Mailpit en local) en `src/server/integrations/email.ts`, reutilizable por otros módulos (por ejemplo `outputs`). Se introduce también `src/lib/errors.ts` con las clases de error de dominio (`NotFoundError`, `ForbiddenError`, `UnauthorizedError`, `ConflictError`, `ValidationError`, `RateLimitError`), que no existían todavía y que reutilizarán los módulos siguientes.
 
-**Decisión explícita para `field-collector`/`form-publishing` (pregunta abierta resuelta, ver README):** un `collector` tiene cuenta y usa `/collect` (protegido por sesión); un formulario publicado puede además marcarse público y rellenarse sin sesión en `/f/[slug]`. El campo "público/restringido" en sí lo añade `form-publishing` sobre `Form`; este módulo ya deja la ruta `/f/**` fuera del guardián para que esa variante funcione sin tocar el middleware otra vez.
+**Decisión explícita para `field-collector`/`form-publishing` (pregunta abierta resuelta, ver README):** un `collector` tiene cuenta y usa `/forms` (listado de formularios publicados, protegido por sesión; #39); un formulario publicado puede además marcarse público y rellenarse sin sesión en `/f/[slug]`. El campo "público/restringido" en sí lo añade `form-publishing` sobre `Form`; este módulo ya deja la ruta `/f/**` fuera del guardián para que esa variante funcione sin tocar el middleware otra vez.
 
 ## Modelo de datos
 
@@ -128,13 +128,16 @@ model LoginToken {
 | Entrada | `src/app/api/auth/[...nextauth]/route.ts` | `export const { GET, POST } = handlers`. |
 | Entrada | `src/server/auth/auth.actions.ts` | Server actions: `requestMagicLinkAction`. |
 | Entrada | `src/server/auth/user.actions.ts` | Server actions: `inviteUserAction`, `deactivateUserAction`, `acceptInvitationAction`. |
-| Middleware | `middleware.ts` (raíz) | Guardián de sesión de `/admin/**` y `/collect/**` (RF-AUT-06). |
+| Middleware | `middleware.ts` (raíz) | Guardián de sesión de `/admin/**` (solo `admin`; un `collector` va a `/forms`) y `/forms/**` (cualquier sesión) (RF-AUT-06, RF-AUT-09). |
 | Interfaz | `src/app/login/page.tsx`, `src/components/auth/login-form.tsx` | Formulario de login (contraseña o enlace mágico). |
 | Interfaz | `src/app/login/magic/page.tsx` | Verifica el token del enlace mágico (`?token=`) y abre sesión. |
 | Interfaz | `src/app/invite/[token]/page.tsx`, `src/components/auth/accept-invitation-form.tsx` | Aceptar invitación: fijar contraseña. |
 | Interfaz | `src/app/admin/layout.tsx`, `src/app/admin/page.tsx` | Layout protegido y placeholder del panel (el contenido real lo añade `form-editor`, #6). |
 | Interfaz | `src/app/admin/users/page.tsx` | Listado de usuarios e invitaciones de la organización, invitar, desactivar. |
-| Interfaz | `src/app/collect/page.tsx` | Placeholder de la app de recogida (el contenido real lo añade `field-collector`). |
+| ~~Interfaz~~ | ~~`src/app/collect/page.tsx`~~ | **Eliminado en #39** (placeholder de la app de recogida). |
+| Interfaz | `src/app/forms/page.tsx`, `src/components/forms/published-forms-list.tsx` | Listado de formularios publicados con «Rellenar» (RF-AUT-09, #39). Ver [Listado de formularios publicados](#listado-de-formularios-publicados-39). |
+| Repositorio | `src/server/form-publishing/form-publishing.repository.ts` (añadir) | `listPublishedForms(organizationId)` (#39). |
+| Servicio | `src/server/form-publishing/form-publishing.service.ts` (añadir) | `listPublishedFormsForOrg(organizationId)` (#39). |
 | Datos de ejemplo | `prisma/seed.ts` (modificar) | Crea la organización de ejemplo, un admin y un collector (sustituye el placeholder de `platform`). Credenciales fijas, ver [Datos de ejemplo (seed)](#datos-de-ejemplo-seed). |
 
 ### Datos de ejemplo (seed)
@@ -391,7 +394,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null>; // lee auth
 export async function requireSession(options?: { role?: Role }): Promise<CurrentUser>;
 /** Para Server Components (páginas/layouts): igual que requireSession
  *  pero en vez de lanzar, hace redirect("/login") o
- *  redirect("/collect") (admin requerido y el usuario es collector). */
+ *  redirect("/forms") (admin requerido y el usuario es collector). */
 export async function requireAdminPage(): Promise<CurrentUser>;
 /** Azúcar sobre requireSession: `(await requireSession(options)).organizationId`.
  *  Es la función que reutilizan los repositorios de los demás módulos. */
@@ -432,8 +435,47 @@ export const { handlers, auth, signIn, signOut }: {
 ```ts
 // middleware.ts
 export default auth((req) => { /* ver Flujos */ });
-export const config = { matcher: ["/admin/:path*", "/collect/:path*"] };
+export const config = { matcher: ["/admin/:path*", "/forms/:path*"] };
 ```
+
+### Listado de formularios publicados (#39)
+
+Sustituye a `/collect`. Ruta nueva `/forms` (fuera del layout de `/admin`; el `matcher` la protege con "cualquier sesión", y la página lo vuelve a comprobar). Al borrar `/collect/**` del `matcher`, `GET /collect` cae en el 404 por defecto de Next.js (no hay `page.tsx`).
+
+```ts
+// src/server/form-publishing/form-publishing.repository.ts (añadir)
+export type PublishedFormRow = { id: string; name: string; slug: string };
+/** Formularios con status "published", slug no nulo y archivedAt null de la
+ *  organización, ordenados por name asc (y id asc como desempate). SIEMPRE
+ *  filtra por organizationId. */
+export function listPublishedForms(organizationId: string): Promise<PublishedFormRow[]>;
+// where: { organizationId, status: "published", archivedAt: null, slug: { not: null } }
+// select: { id, name, slug } ; orderBy: [{ name: "asc" }, { id: "asc" }]
+// (el tipo de `slug` se estrecha a string tras filtrar los null).
+
+// src/server/form-publishing/form-publishing.service.ts (añadir)
+/** Delegación directa en listPublishedForms; existe para que la página no
+ *  importe el repositorio. */
+export function listPublishedFormsForOrg(organizationId: string): Promise<PublishedFormRow[]>;
+```
+
+```tsx
+// src/app/forms/page.tsx — Server Component, `export const dynamic = "force-dynamic"`
+// const user = await getCurrentUser(); if (!user) redirect("/login");
+// const forms = await listPublishedFormsForOrg(user.organizationId);
+// return <PublishedFormsList forms={forms} userName={user.name} isAdmin={user.role === "admin"} />;
+
+// src/components/forms/published-forms-list.tsx — presentacional, sin lógica de negocio
+export function PublishedFormsList(props: {
+  forms: PublishedFormRow[]; userName: string; isAdmin: boolean;
+}): JSX.Element;
+```
+
+Interfaz (textos en español): `<h1>` «Formularios», saludo con `userName`; una tarjeta o fila por formulario con el nombre y un enlace «Rellenar» (`<Link href={`/f/${slug}`}>`, `data-testid="fill-link"`), con área táctil mínima de 44 px; lista con `data-testid="published-forms"`. Sin formularios: texto «Todavía no hay formularios publicados.» (`data-testid="forms-empty"`). Si `isAdmin`, un enlace «Ir al panel» a `/admin`. Una sola columna a 360 px, tarjetas `max-w-xl` centradas en pantallas grandes. Sin filtros ni paginación.
+
+Cambios de redirección: `middleware.ts` redirige al `collector` que entra en `/admin/**` a `/forms`; `requireAdminPage` hace `redirect("/forms")`. El inicio de sesión no cambia (`router.push("/admin")` en login, enlace mágico e invitación): el `collector` llega a `/forms` por esa redirección (un salto extra, sin parpadeo del panel).
+
+Otras referencias a `/collect` que se actualizan en el mismo cambio (solo texto/código): `src/server/auth/session.ts`, `middleware.ts` (comentarios incluidos), `e2e/auth-admin-guard.spec.ts`, `e2e/auth-invitation.spec.ts` (comentario y `waitForURL`), `e2e/outputs-export.spec.ts` (comentario), y en otros módulos `specs/form-editor/design.md`, `specs/submissions-dashboard/design.md`, `specs/form-publishing/design.md`, `specs/tenancy-auth/test-plan.md`. `prisma/seed.ts` no cita la ruta (solo el rol); su mensaje y comentarios no cambian. No hay migración.
 
 ### Motivo de los fallos de login y mensajes (#20)
 
@@ -594,9 +636,26 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 | RF-AUT-07, CA-AUT-01 | Vitest | `src/server/auth/user.repository.test.ts` — `updateUserStatus`/`findUserById` con el `organizationId` de otra organización devuelven `null` aunque el `id` exista. |
 | — (utilidad) | Vitest | `src/lib/auth/auth.schema.test.ts` — `loginSchema`/`inviteUserSchema`/`acceptInvitationSchema` aceptan entradas válidas y rechazan las inválidas (email mal formado, contraseña corta, rol fuera de la lista). |
 | — (utilidad) | Vitest | `src/lib/auth/emails.test.ts` — `buildMagicLinkEmail`/`buildInvitationEmail` incluyen la URL recibida en el HTML y en el texto. |
-| CA-AUT-02 | Playwright | `e2e/auth-admin-guard.spec.ts` — con sesión de `collector` (login por UI), `GET /admin` redirige a `/collect`; con sesión de `admin`, `/admin` carga. |
+| CA-AUT-02 | Playwright | `e2e/auth-admin-guard.spec.ts` — con sesión de `collector` (login por UI), `GET /admin` acaba en `/forms` y se ve el listado; con sesión de `admin`, `/admin` carga. |
+| RF-AUT-09, CA-AUT-14 | Vitest | `src/server/form-publishing/form-publishing.repository.test.ts` (ampliar) — `listPublishedForms`: devuelve solo `published` no archivados con slug; excluye borradores, despublicados (`status: draft` con `publishedVersion`) y archivados; con dos organizaciones, cada una solo ve los suyos; orden por nombre. |
+| RF-AUT-09 | Vitest | `src/server/form-publishing/form-publishing.service.test.ts` (ampliar) — `listPublishedFormsForOrg` pasa el `organizationId` recibido al repositorio (espía) y devuelve su resultado. |
+| CA-AUT-11, CA-AUT-13, CA-AUT-14 | Playwright | `e2e/auth-forms-list.spec.ts` (nuevo) — ver [Tests e2e de #39](#tests-e2e-de-39). |
+| CA-AUT-12, CA-AUT-15 | Playwright / shell | `e2e/auth-forms-list.spec.ts` (`GET /collect` → 404) y el `grep` de PP-AUT-18. |
 | CA-AUT-03 | Playwright | `e2e/auth-invitation.spec.ts` — un `beforeAll` crea una invitación llamando directamente a `userService.inviteUser` (sin pasar por email); el test abre `/invite/<token>`, fija una contraseña y comprueba que termina con sesión iniciada en la organización y el rol correctos. |
 | RF-AUT-01, CA-AUT-04, RNF-AUT-03 | Playwright | `e2e/auth-login.spec.ts` — login con el admin del seed (`admin@demo.formia.local` / `Demo1234!`, ver [Datos de ejemplo (seed)](#datos-de-ejemplo-seed)) y contraseña correcta entra en `/admin`; con contraseña incorrecta se queda en `/login` con un mensaje de error; comprueba que la cookie de sesión lleva `HttpOnly` y `SameSite=Lax`. |
+
+### Tests e2e de #39
+
+`e2e/auth-forms-list.spec.ts` (nuevo), con los helpers de `e2e/helpers/form-publishing.ts` (`login`, `seedForm`, `publishViaService`, `uniqueName`):
+
+- `beforeAll`: crea con `seedForm` dos formularios de la organización demo y publica solo uno (`publishViaService`); el otro queda borrador. Crea una segunda `Organization` con `prisma.organization.create` y un `Form` suyo con `status: "published"`, `slug` único y `draftSchema` mínimo válido (por inserción directa con Prisma; las pruebas no usan la API). `afterAll` borra esos registros.
+- Test 1 (CA-AUT-02, CA-AUT-14): login como `collector@demo.formia.local`, `goto("/admin")`, `toHaveURL(/\/forms$/)`; `published-forms` contiene el nombre del publicado y **no** el del borrador ni el de la otra organización.
+- Test 2 (CA-AUT-11): clic en el `fill-link` del formulario publicado; `toHaveURL(new RegExp("/f/" + slug + "$"))`.
+- Test 3 (CA-AUT-13): sin sesión, `goto("/forms")` termina en `/login`.
+- Test 4 (CA-AUT-12): `request.get(removed)` devuelve 404 (con y sin sesión), con `const removed = "/" + "collect"` para que el `grep` de CA-AUT-15 no encuentre la cadena literal en `e2e/`.
+- Test 5 (móvil): con `page.setViewportSize({ width: 360, height: 740 })`, sin desbordamiento horizontal (`document.documentElement.scrollWidth <= 360`).
+
+`e2e/auth-admin-guard.spec.ts` y `e2e/auth-invitation.spec.ts` cambian `/collect` por `/forms`.
 
 ## Tareas de desarrollo
 
@@ -618,7 +677,7 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 | 14 | #4 | `src/server/auth/auth.actions.ts`, `src/server/auth/user.actions.ts` | 9, 10, 13 |
 | 15 | #4 | `src/app/login/page.tsx` + `login-form.tsx`, `src/app/login/magic/page.tsx` | 11, 14 |
 | 16 | #4 | `src/app/invite/[token]/page.tsx` + `accept-invitation-form.tsx` | 14 |
-| 17 | #4 | `src/app/admin/layout.tsx`, `src/app/admin/page.tsx`, `src/app/admin/users/page.tsx`, `src/app/collect/page.tsx` | 13, 14 |
+| 17 | #4 | `src/app/admin/layout.tsx`, `src/app/admin/page.tsx`, `src/app/admin/users/page.tsx`, ~~`src/app/collect/page.tsx`~~ (eliminado en #39) | 13, 14 |
 | 18 | #4 | `prisma/seed.ts` (admin + collector de ejemplo, credenciales de [Datos de ejemplo (seed)](#datos-de-ejemplo-seed)) | 7, 9 |
 | 19 | #4 | `e2e/auth-login.spec.ts`, `e2e/auth-admin-guard.spec.ts`, `e2e/auth-invitation.spec.ts` | 15, 16, 17, 18 |
 
@@ -634,9 +693,21 @@ Los puntos de entrada de este módulo son server actions (devuelven `{ error }` 
 | 20.6 | `src/server/auth/authorize.ts` + test; `src/auth.ts` usa las dos funciones | 20.3, 20.4, 20.5 |
 | 20.7 | `src/components/auth/login-form.tsx` (mensaje por `result.code`) + e2e `auth-login.spec.ts` ampliado y `auth-rate-limit.spec.ts` | 20.6 |
 
+### Tareas de #39 (retirar `/collect`, listado `/forms`)
+
+| Orden | Tarea | Depende de |
+| --- | --- | --- |
+| 39.1 | `listPublishedForms` en `form-publishing.repository.ts` + tests | — |
+| 39.2 | `listPublishedFormsForOrg` en `form-publishing.service.ts` + test | 39.1 |
+| 39.3 | `src/components/forms/published-forms-list.tsx` y `src/app/forms/page.tsx` | 39.2 |
+| 39.4 | `middleware.ts` (matcher y redirección) y `session.ts` (`requireAdminPage`) | — |
+| 39.5 | Borrar `src/app/collect/` | 39.3, 39.4 |
+| 39.6 | e2e: `auth-forms-list.spec.ts` (nuevo); actualizar `auth-admin-guard`, `auth-invitation`, comentario de `outputs-export` | 39.3–39.5 |
+
 ## Historial de cambios
 
 - 2026-11-17 — Diseño técnico inicial (#4): modelo de datos (`Organization`, `User`, `Invitation`, `LoginToken`), Auth.js v5 con sesión JWT y dos proveedores `Credentials` (contraseña y enlace mágico), guardián de sesión (`middleware.ts`, `session.ts`) y su reutilización por los módulos siguientes, invitación de usuarios, límite de intentos de login en memoria, e integración de email genérica.
 - 2026-11-17 — Revisión del arquitecto (#4, APROBADO): se fijan las credenciales exactas del seed ([Datos de ejemplo (seed)](#datos-de-ejemplo-seed)), de las que dependían PP-AUT-07/08 sin un valor concreto documentado.
 - 2026-11-24 — Corrección: el callback `session` no copiaba el id del usuario a `session.user.id`, así que `getCurrentUser()` devolvía `null` y ningún admin podía entrar en `/admin` aunque el login fuera correcto. Ahora lo copia desde `token.sub`; test en `src/auth.config.test.ts`.
 - 2026-11-24 — Límite de fallos y motivo de login (#20): el límite cuenta solo fallos y un login correcto lo reinicia (`isBlocked`/`recordFailure`/`reset` sustituyen a `checkAndConsume`, con limpieza y tope de tamaño); `verifyPassword` comprueba el bloqueo antes de buscar al usuario y distingue `InactiveUserError` internamente; `authorize()` se extrae a `authorize.ts`, traduce errores a motivo tipado y registra una línea JSON sin datos personales (`login-failure.ts`); `rate_limited` llega a la pantalla con `RateLimitedSignin` (`code`); riesgo aceptado de bloqueo dirigido documentado.
+- 2026-11-27 — Retirar `/collect` (#39): el `collector` pasa a `/forms`, un listado de formularios publicados de su organización con «Rellenar» a `/f/<slug>` (`listPublishedForms` en el repositorio de `form-publishing`, página `src/app/forms/page.tsx`); `middleware.ts` (matcher `/admin` y `/forms`) y `requireAdminPage` redirigen allí; se elimina `src/app/collect/`; tests y tareas. Decisión: el login sigue llevando a `/admin` y la redirección del middleware completa el camino del `collector`.

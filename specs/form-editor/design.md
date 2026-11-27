@@ -360,7 +360,7 @@ sequenceDiagram
 | Error de dominio | HTTP (server actions: campo `error` devuelto, no HTTP) | Mensaje en la interfaz |
 | --- | --- | --- |
 | `UnauthorizedError` (de `requireSession`) | 401 | Redirige a `/login` (vía `requireAdminPage`). |
-| `ForbiddenError` | 403 | Redirige a `/collect` (rol `collector` en `/admin`). |
+| `ForbiddenError` | 403 | Redirige a `/forms` (rol `collector` en `/admin`). |
 | `NotFoundError` | 404 / `notFound()` | "No se ha encontrado el formulario." |
 | `ValidationError` (borrador inválido) | — | El campo señalado en `field-properties-panel.tsx` con el mensaje de `DraftFieldIssue`; el indicador pasa a "No se puede guardar: revisa «<etiqueta del campo>»." (RF-EDT-10, CA-EDT-07) |
 
@@ -414,6 +414,8 @@ sequenceDiagram
 | 17 | #6 | `e2e/form-editor-canvas.spec.ts` (CA-EDT-01, 08, 09), `e2e/form-editor-autosave.spec.ts` (CA-EDT-03, 07, 10, 12), `e2e/form-editor-listing.spec.ts` (CA-EDT-04, 05, 06) | 16 |
 
 ## Historial de cambios
+
+- 2026-11-27 — Solo texto (#39): la redirección del `collector` desde `/admin` pasa de `/collect` (retirada) a `/forms`.
 
 - 2026-11-17 — Diseño inicial (#6): modelo `Form` propio (sin `FormVersion`/`Submission`), `DraftFormSchema` sin mínimo de campos, editor con `@dnd-kit`, placeholders para tema real y asistente de IA.
 - 2026-11-17 — Revisión del arquitecto (#6): cobertura de tests para CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06, 07); `mapDraftIssuesToFields` tipado con `z.ZodError` en vez de `z.core.$ZodIssue[]`, para no depender de un tipo interno de `zod`; aclarado que `mobile-preview.tsx` lista todos los campos sin evaluar `visibleIf`, marcando los condicionales con una insignia.

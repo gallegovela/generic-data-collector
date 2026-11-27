@@ -9,8 +9,8 @@ import { authConfig } from "@/auth.config";
 const { auth } = NextAuth(authConfig);
 
 /**
- * Guardián de sesión de `/admin/**` (solo `admin`) y `/collect/**`
- * (cualquier sesión). `/f/**` queda fuera del `matcher` a propósito:
+ * Guardián de sesión de `/admin/**` (solo `admin`) y `/forms/**`
+ * (cualquier sesión). Un collector en `/admin` va a `/forms`. `/f/**` queda fuera del `matcher` a propósito:
  * es la infraestructura de RF-AUT-08 para que el relleno público de
  * formularios no pase por el guardián de sesión.
  *
@@ -26,12 +26,12 @@ export default auth((req) => {
   }
 
   if (nextUrl.pathname.startsWith("/admin") && user.role !== "admin") {
-    return NextResponse.redirect(new URL("/collect", nextUrl.origin));
+    return NextResponse.redirect(new URL("/forms", nextUrl.origin));
   }
 
   return NextResponse.next();
 });
 
 export const config = {
-  matcher: ["/admin/:path*", "/collect/:path*"],
+  matcher: ["/admin/:path*", "/forms/:path*"],
 };

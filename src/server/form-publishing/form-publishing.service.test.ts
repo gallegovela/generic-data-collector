@@ -12,6 +12,7 @@ import {
   getFormVersion,
   getPublishedFormBySlug,
   getPublishingState,
+  listPublishedFormsForOrg,
   publishForm,
   setFormAccessMode,
   unpublishForm,
@@ -173,6 +174,15 @@ describe("form-publishing.service", () => {
     expect(await getPublishedFormBySlug(slug)).toEqual({ state: "closed" });
     await expect(getPublishedFormBySlug("zzzzzzzzzz")).rejects.toBeInstanceOf(NotFoundError);
     await expect(getPublishedFormBySlug("no-valido")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  // Cubre: RF-AUT-09
+  it("RF-AUT-09: listPublishedFormsForOrg delega en el repositorio con el organizationId", async () => {
+    const id = await newForm("Listado");
+    await publishForm(orgA.id, userA, id, { accessMode: "public" });
+    const rows = await listPublishedFormsForOrg(orgA.id);
+    expect(rows.map((r) => r.id)).toContain(id);
+    expect(await listPublishedFormsForOrg(orgB.id)).toEqual([]);
   });
 
   // Cubre: RF-PUB-03

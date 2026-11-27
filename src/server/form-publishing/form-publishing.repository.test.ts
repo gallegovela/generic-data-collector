@@ -123,6 +123,47 @@ describe("form-publishing.repository", () => {
     ).rejects.toBeInstanceOf(repository.SlugTakenError);
   });
 
+  // Cubre: RF-AUT-09, CA-AUT-14
+  it("CA-AUT-14: listPublishedForms solo devuelve publicados no archivados de la organización, por nombre", async () => {
+    const org = await createOrganization({ name: "Org C (listPublishedForms test)" });
+    const other = await createForm(orgB.id, { name: "Ajeno", draft: { title: "Ajeno", fields: [] } });
+    try {
+      const mk = (name: string) => createForm(org.id, { name, draft: { title: name, fields: [] } });
+      const publish = (id: string) =>
+        createVersionAndPublish(org.id, id, { schema, accessMode: "registered", slug: rndSlug(), userId: "u" });
+      const zeta = await mk("Zeta");
+      const alfa = await mk("Alfa");
+      const draft = await mk("Borrador");
+      const unpublished = await mk("Despublicado");
+      const archived = await mk("Archivado");
+      await publish(zeta.id);
+      await publish(alfa.id);
+      await publish(unpublished.id);
+      await setUnpublished(org.id, unpublished.id);
+      await publish(archived.id);
+      await prisma.form.update({ where: { id: archived.id }, data: { archivedAt: new Date() } });
+      await createVersionAndPublish(orgB.id, other.id, {
+        schema,
+        accessMode: "registered",
+        slug: rndSlug(),
+        userId: "u",
+      });
+
+      const rows = await repository.listPublishedForms(org.id);
+      expect(rows.map((r) => r.name)).toEqual(["Alfa", "Zeta"]);
+      expect(rows.every((r) => r.slug.length > 0)).toBe(true);
+      expect(draft.id).toBeTruthy();
+      const rowsB = await repository.listPublishedForms(orgB.id);
+      expect(rowsB.map((r) => r.name)).toEqual(["Ajeno"]);
+    } finally {
+      await prisma.formVersion.deleteMany({ where: { organizationId: org.id } });
+      await prisma.form.deleteMany({ where: { organizationId: org.id } });
+      await prisma.formVersion.deleteMany({ where: { formId: other.id } });
+      await prisma.form.delete({ where: { id: other.id } });
+      await prisma.organization.delete({ where: { id: org.id } });
+    }
+  });
+
   // Cubre: RNF-PUB-03
   it("RNF-PUB-03: un formulario existente tiene valores por defecto compatibles", async () => {
     const form = await createForm(orgA.id, { name: "Def", draft: { title: "Def", fields: [] } });

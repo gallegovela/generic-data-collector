@@ -3,7 +3,7 @@
 - **Prefijo:** `AUT`
 - **Estado:** diseñado
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #1 (análisis), #4 (diseño), #18 (análisis), #20 (límite de login y trazabilidad)
+- **Issues:** #1 (análisis), #4 (diseño), #18 (análisis), #20 (límite de login y trazabilidad), #39 (retirar `/collect`, listado `/forms`)
 
 ## Objetivo
 
@@ -39,9 +39,10 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 | RF-AUT-03 | Must | Cada usuario pertenece a una única organización y tiene rol `admin` o `collector`. |
 | RF-AUT-04 | Must | Un administrador puede invitar usuarios por email indicando su rol. |
 | RF-AUT-05 | Must | Un administrador puede desactivar usuarios de su organización. |
-| RF-AUT-06 | Must | Las rutas del panel solo son accesibles para `admin`; el `collector` solo accede a la app de recogida. |
+| RF-AUT-06 | Must | Las rutas del panel solo son accesibles para `admin`; el `collector` que intenta entrar en `/admin` es redirigido al listado de formularios publicados (`/forms`, RF-AUT-09). *(Reformulado en #39: antes lo enviaba a `/collect`, ruta retirada.)* |
 | RF-AUT-07 | Must | Todas las lecturas y escrituras de datos de negocio se filtran por la organización del usuario autenticado (o de la API key). |
 | RF-AUT-08 | Should | Un formulario publicado puede marcarse como público (sin inicio de sesión) o restringido a usuarios de la organización. |
+| RF-AUT-09 | Must | Existe `/forms`, una página protegida por sesión (cualquier rol) que lista los formularios **publicados** de la organización del usuario, cada uno con una acción «Rellenar» que lleva a `/f/<slug>`. Es el destino del `collector` tras entrar en `/admin`. Sin filtros ni paginación en el piloto. (#39) |
 
 ## Requisitos no funcionales
 
@@ -66,7 +67,7 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 ## Criterios de aceptación
 
 - **CA-AUT-01** — Dado un administrador de la organización A, cuando pide o modifica un recurso de la organización B por su id (por ejemplo, otro usuario), entonces el sistema responde como si no existiera (404), sin revelar que pertenece a otra organización. Este módulo lo demuestra con `User`, el único recurso propio con `organizationId`; es el mismo contrato (`getCurrentOrg` + repositorio filtrado) que usarán `Form` y `Submission` cuando existan.
-- **CA-AUT-02** — Dado un `collector`, cuando intenta abrir `/admin`, entonces se le redirige a `/collect` (la app de recogida).
+- **CA-AUT-02** — Dado un `collector` autenticado, cuando abre `/admin`, entonces acaba en `/forms` y ve solo los formularios publicados de su organización. *(Reformulado en #39: antes terminaba en `/collect`.)*
 - **CA-AUT-03** — Dada una invitación enviada, cuando el invitado abre el enlace y crea su contraseña, entonces queda en la organización con el rol indicado y con sesión iniciada.
 - **CA-AUT-04** — Dado un usuario activo con contraseña, cuando inicia sesión con el email y la contraseña correctos, entonces queda con sesión iniciada; con la contraseña incorrecta, se le informa del error sin iniciar sesión.
 - **CA-AUT-05** — Dado un usuario activo que pide un enlace mágico, cuando abre ese enlace, entonces queda con sesión iniciada; si el enlace ya se usó o ha caducado, se le informa del error sin iniciar sesión.
@@ -75,13 +76,19 @@ Permitir que varias organizaciones (clientes) usen la misma instalación con sus
 - **CA-AUT-08** — Dado un email con 5 fallos de login en 15 minutos, cuando se intenta el 6.º inicio de sesión, aunque la contraseña sea correcta, entonces no se inicia sesión, se muestra «Demasiados intentos, prueba de nuevo más tarde» y se registra el motivo `rate_limited`.
 - **CA-AUT-09** — Dado un login con email inexistente, con usuario inactivo o con contraseña incorrecta, entonces la pantalla muestra exactamente el mismo mensaje en los tres casos («Email o contraseña incorrectos.»), mientras que el log distingue `invalid_credentials` de `inactive_user`.
 - **CA-AUT-10** — Dado cualquier fallo de login (contraseña o enlace mágico), entonces se escribe una única línea JSON `{"event":"auth.login_failed","provider":...,"reason":...}` que no contiene el email, la contraseña ni el token.
+- **CA-AUT-11** — Dado el listado `/forms`, cuando el usuario pulsa «Rellenar» en un formulario, entonces navega a `/f/<slug>` de ese formulario. (#39)
+- **CA-AUT-12** — Dado `GET /collect` (con o sin sesión), entonces responde 404: la ruta ya no existe. (#39)
+- **CA-AUT-13** — Dado un usuario sin sesión, cuando abre `/forms`, entonces va a `/login`. (#39)
+- **CA-AUT-14** — Dadas dos organizaciones, cuando un usuario de una abre `/forms`, entonces nunca ve formularios de la otra, y tampoco borradores, despublicados ni archivados de la suya. (#39)
+- **CA-AUT-15** — Dado el repositorio, entonces `grep -rn "/collect"` en `src/`, `middleware.ts`, `e2e/` y `prisma/` no devuelve ninguna referencia a la ruta antigua. (#39)
 
 ## Supuestos y preguntas abiertas
 
-- **Resuelto (#4)** — ¿Los trabajadores de campo tendrán cuenta (`collector`) o rellenarán sobre todo formularios públicos? Se adopta la propuesta: ambos. Un `collector` tiene cuenta y accede a `/collect` (su app de recogida, protegida por sesión); un formulario publicado puede además marcarse público y rellenarse sin iniciar sesión en `/f/[slug]` (RF-AUT-08), sin pasar por el guardián de sesión de este módulo. El campo que marca un formulario como público lo añade `form-publishing` sobre `Form`; aquí solo se deja la ruta pública sin guardián. Ver [design.md](design.md#resumen).
+- **Resuelto (#4)** — ¿Los trabajadores de campo tendrán cuenta (`collector`) o rellenarán sobre todo formularios públicos? Se adopta la propuesta: ambos. Un `collector` tiene cuenta y accede a `/forms` (listado de formularios publicados, protegido por sesión; antes `/collect`, retirada en #39); un formulario publicado puede además marcarse público y rellenarse sin iniciar sesión en `/f/[slug]` (RF-AUT-08), sin pasar por el guardián de sesión de este módulo. El campo que marca un formulario como público lo añade `form-publishing` sobre `Form`; aquí solo se deja la ruta pública sin guardián. Ver [design.md](design.md#resumen).
 
 ## Historial de cambios
 
 - 2026-11-14 — Creación del módulo.
 - 2026-11-17 — Diseño técnico (#4): se resuelve la pregunta sobre cuentas `collector` frente a formularios públicos (ambos); se corrige que `Organization` **no** incluye todavía los datos de tema (los añadirá `theming` en su propia migración); se reformula CA-AUT-01 para que sea comprobable ya en este módulo (usando `User` como recurso de prueba, antes de que existan `Form`/`Submission`); se deja explícito que la parte "formulario marcado como público/restringido" de RF-AUT-08 la completa `form-publishing`, y que este módulo solo entrega la infraestructura (rutas `/f/**` sin guardián de sesión); se añaden CA-AUT-04 (login con contraseña, RF-AUT-01) y CA-AUT-05 (login con enlace mágico, RF-AUT-02), que no tenían criterio propio.
 - 2026-11-24 — Login: motivo de los fallos y límite solo de fallos (#20): se reformula RNF-AUT-04 (cuenta solo fallos; un login correcto reinicia el contador; el bloqueo impide incluso la contraseña correcta); nuevo RNF-AUT-05 (trazabilidad de fallos sin datos personales); nuevos CA-AUT-06 a CA-AUT-10 (el límite no existía como criterio). No se renumera nada.
+- 2026-11-27 — Retirar `/collect` (#39, padre #23): se reformulan RF-AUT-06 y CA-AUT-02 (el `collector` va a `/forms`, no a `/collect`); nuevo RF-AUT-09 (listado `/forms` de formularios publicados con «Rellenar»); nuevos CA-AUT-11 a CA-AUT-15 (enlace a `/f/<slug>`, `/collect` da 404, sin sesión va a `/login`, aislamiento por organización, sin referencias a la ruta antigua). No se renumera nada.

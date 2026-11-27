@@ -235,3 +235,14 @@ export async function getFormVersion(versionId: string): Promise<StoredFormVersi
     createdAt: stored.createdAt,
   };
 }
+
+/**
+ * Formularios publicados de la organización (listado de `/forms`).
+ *
+ * Cubre: RF-AUT-09
+ */
+export function listPublishedFormsForOrg(
+  organizationId: string,
+): Promise<repository.PublishedFormRow[]> {
+  return repository.listPublishedForms(organizationId);
+}

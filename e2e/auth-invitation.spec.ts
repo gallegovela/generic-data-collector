@@ -32,8 +32,8 @@ test("aceptar una invitación desde la interfaz abre sesión con el rol de la in
   await page.getByRole("button", { name: "Aceptar invitación" }).click();
 
   // La invitación es de rol collector: tras iniciar sesión termina en
-  // /collect (el middleware redirige desde /admin, ver RF-AUT-06).
-  await page.waitForURL(/\/collect$/);
+  // /forms (el middleware redirige desde /admin, ver RF-AUT-06).
+  await page.waitForURL(/\/forms$/);
 
   const cookies = await context.cookies();
   expect(cookies.some((cookie) => cookie.name.includes("session-token"))).toBe(true);
