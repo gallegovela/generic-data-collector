@@ -25,9 +25,26 @@ export function submissionsOf(formId: string) {
   return prisma.submission.findMany({ where: { formId }, orderBy: { createdAt: "asc" } });
 }
 
+/**
+ * El navegador solo ofrece geolocalización en contextos seguros y el entorno
+ * de pruebas sirve la app por HTTP (http://web:3000): se simula la posición.
+ */
+export async function stubGeolocation(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: {
+        getCurrentPosition: (ok: (p: unknown) => void) =>
+          ok({ coords: { latitude: 40.4168, longitude: -3.7038, accuracy: 10 }, timestamp: Date.now() }),
+      },
+    });
+  });
+}
+
 /** Dibuja un trazo en el canvas de firma y espera a que se registre. */
 export async function drawSignature(page: Page, fieldId: string): Promise<void> {
   const canvas = page.getByTestId(`signature-canvas-${fieldId}`);
+  await canvas.scrollIntoViewIfNeeded();
   const box = await canvas.boundingBox();
   if (!box) throw new Error("El canvas de firma no es visible.");
   await page.mouse.move(box.x + 20, box.y + 20);

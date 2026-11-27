@@ -1,5 +1,6 @@
 "use client";
 
+import { newUuid } from "@/lib/field-collector/uuid";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
@@ -55,7 +56,7 @@ export function FillForm({
   exitPath: string;
 }) {
   const router = useRouter();
-  const clientId = useRef<string>(crypto.randomUUID());
+  const clientId = useRef<string>(newUuid());
   const capturedAt = useRef<string | null>(null);
 
   const [answers, setAnswers] = useState<Record<string, unknown>>(emptyAnswers);

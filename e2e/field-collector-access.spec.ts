@@ -26,7 +26,7 @@ test.beforeAll(async () => {
       organizationId: org.id,
       email: OTHER_EMAIL,
       name: "Usuario Otra Org",
-      role: "collector",
+      role: "admin",
       status: "active",
       passwordHash: await hashPassword(PASSWORD),
     },
@@ -44,7 +44,7 @@ async function loginAsOtherOrg(page: Page): Promise<void> {
   await page.getByLabel("Email").fill(OTHER_EMAIL);
   await page.getByLabel("Contraseña").fill(PASSWORD);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await page.waitForURL(/\/collect$/);
+  await page.waitForURL(/\/admin/);
 }
 
 const FORM = {

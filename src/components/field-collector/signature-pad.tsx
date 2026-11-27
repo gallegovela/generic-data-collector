@@ -1,5 +1,6 @@
 "use client";
 
+import { newUuid } from "@/lib/field-collector/uuid";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { PendingFile } from "./photo-input";
@@ -79,7 +80,7 @@ export function SignaturePad({
       if (value) URL.revokeObjectURL(value.previewUrl);
       setHasInk(true);
       onChange({
-        uploadId: crypto.randomUUID(),
+        uploadId: newUuid(),
         kind: "signature",
         blob,
         previewUrl: URL.createObjectURL(blob),

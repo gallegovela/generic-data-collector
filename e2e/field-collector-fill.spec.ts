@@ -6,6 +6,7 @@ import {
   drawSignature,
   login,
   publishTestForm,
+  stubGeolocation,
   submissionsOf,
 } from "./helpers/field-collector";
 
@@ -39,7 +40,9 @@ const CONDITIONAL: DraftForm = {
 };
 
 test.describe("con ubicación permitida", () => {
-  test.use({ permissions: ["geolocation"], geolocation: { latitude: 40.4168, longitude: -3.7038 } });
+  test.beforeEach(async ({ page }) => {
+    await stubGeolocation(page);
+  });
 
   // Cubre: CA-COL-03, RF-COL-02
   test("CA-COL-03: el campo condicional aparece y desaparece y no se exige oculto", async ({ page }) => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { newUuid } from "@/lib/field-collector/uuid";
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -41,7 +42,7 @@ export function PhotoInput({
     const added: PendingFile[] = Array.from(list)
       .slice(0, room)
       .map((file) => ({
-        uploadId: crypto.randomUUID(),
+        uploadId: newUuid(),
         kind: "photo" as const,
         blob: file,
         previewUrl: URL.createObjectURL(file),
