@@ -190,3 +190,72 @@ model StoredFile {
   @@index([submissionId, createdAt])
   @@map("stored_files")
 }
+
+// outputs (#35): destinos por formulario y cola de envíos en PostgreSQL.
+// formId y submissionId son identificadores lógicos, sin clave foránea.
+enum DestinationKind {
+  email
+  webhook
+}
+
+enum DeliveryStatus {
+  pending
+  sending
+  sent
+  failed
+}
+
+model Destination {
+  id             String          @id @default(cuid())
+  organizationId String
+  formId         String
+  kind           DestinationKind
+  enabled        Boolean         @default(true)
+  emailTo        String[]
+  webhookUrl     String?
+  webhookSecret  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([formId, kind])
+  @@index([organizationId, formId])
+  @@map("destinations")
+}
+
+model Delivery {
+  id             String          @id @default(cuid())
+  organizationId String
+  destinationId  String
+  formId         String
+  submissionId   String
+  kind           DestinationKind
+  status         DeliveryStatus  @default(pending)
+  attempts       Int             @default(0)
+  nextAttemptAt  DateTime
+  lastError      String?
+  lastStatusCode Int?
+  sentAt         DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([destinationId, submissionId])
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, formId, createdAt])
+  @@map("deliveries")
+}
+
+model DeliveryAttempt {
+  id             String   @id @default(cuid())
+  deliveryId     String
+  organizationId String
+  number         Int
+  startedAt      DateTime
+  durationMs     Int
+  ok             Boolean
+  statusCode     Int?
+  error          String?
+
+  @@index([deliveryId, number])
+  @@index([organizationId])
+  @@map("delivery_attempts")
+}

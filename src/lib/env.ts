@@ -37,6 +37,15 @@ export const envSchema = z.object({
   SMTP_FROM: z.string().email().default("no-reply@formia.local"),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
+  // outputs (#35): tope del PDF adjunto, espera del webhook y procesador de envíos.
+  EMAIL_MAX_ATTACHMENT_BYTES: z.coerce.number().int().positive().default(10485760),
+  WEBHOOK_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(60).default(10),
+  DELIVERY_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(1).default(30),
+  // No `z.coerce.boolean`: convertiría "false" en true.
+  DELIVERY_POLLER_ENABLED: z
+    .enum(["true", "false"])
+    .default("true")
+    .transform((value) => value === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   // Salida standalone: la imagen Docker de producción solo copia
   // .next/standalone y .next/static (ver Dockerfile).
   output: "standalone",
+  // outputs (#35): react-pdf se carga en runtime Node, sin empaquetar.
+  serverExternalPackages: ["@react-pdf/renderer"],
   // `cacheComponents`/`partialPrefetching` (activados por defecto por
   // `create-next-app`, no es una decisión de ningún módulo de specs/)
   // se desactivan: su validación de "instant UI" interactúa mal con

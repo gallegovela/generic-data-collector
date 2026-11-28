@@ -22,6 +22,9 @@ x-test-env: &test-env
   S3_ACCESS_KEY: minioadmin
   S3_SECRET_KEY: minioadmin
   S3_FORCE_PATH_STYLE: "true"
+  SMTP_HOST: mailpit
+  # El procesador de `web` compartiría la BD con Vitest y le robaría envíos.
+  DELIVERY_POLLER_ENABLED: "false"
 
 services:
   postgres:

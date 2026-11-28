@@ -53,7 +53,17 @@ describe("loadEnv", () => {
       SMTP_FROM: "no-reply@formia.local",
       SMTP_USER: undefined,
       SMTP_PASSWORD: undefined,
+      EMAIL_MAX_ATTACHMENT_BYTES: 10485760,
+      WEBHOOK_TIMEOUT_SECONDS: 10,
+      DELIVERY_POLL_INTERVAL_SECONDS: 30,
+      DELIVERY_POLLER_ENABLED: true,
     });
+  });
+
+  // Cubre: RNF-OUT-06
+  it("RNF-OUT-06: DELIVERY_POLLER_ENABLED=false desactiva el procesador (no se coacciona a true)", () => {
+    expect(loadEnv({ ...validEnv, DELIVERY_POLLER_ENABLED: "false" }).DELIVERY_POLLER_ENABLED).toBe(false);
+    expect(() => loadEnv({ ...validEnv, DELIVERY_POLLER_ENABLED: "no" })).toThrow(/DELIVERY_POLLER_ENABLED/);
   });
 
   // Cubre: CA-PLT-03, RF-PLT-03
