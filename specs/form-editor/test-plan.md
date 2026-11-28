@@ -3,9 +3,9 @@
 - **Requisitos:** [README.md](README.md)
 - **Diseño:** [design.md](design.md)
 - **Responsable:** analyst-programmer (escribe en `design` y lo ejecuta en `testPR`), architect (revisa)
-- **Issues:** #6
+- **Issues:** #6, #34
 
-Este plan se ejecuta en la etapa `testPR`, sobre la rama `issue-6` de la pull request y **antes de fusionarla**. Necesita PostgreSQL (`Form` es una tabla real) pero no MinIO ni Mailpit: este módulo no sube archivos ni envía email.
+Este plan se ejecuta en la etapa `testPR`, sobre la rama de la PR (`issue-<n>`) y **antes de fusionarla**. Necesita PostgreSQL (`Form` es una tabla real) pero no MinIO ni Mailpit: este módulo no sube archivos ni envía email.
 
 ## Preparación
 
@@ -176,6 +176,42 @@ npm run db:seed
   ```
 - **Resultado esperado:** código de salida 0; todos los tests cuyo título contiene «CA-EDT-12» pasan, sin ninguno fallido ni omitido.
 
+### PP-EDT-14 — «Rellenar» lleva a `/f/<slug>` en un formulario publicado
+
+- **Cubre:** CA-EDT-13
+- **Tipo:** automático (Vitest + Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npx vitest run src/lib/form-editor/fill-link.test.ts -t "CA-EDT-13"
+  npx playwright test e2e/form-editor-listing.spec.ts -g "CA-EDT-13"
+  ```
+- **Resultado esperado:** código de salida 0 en ambos comandos; todos los tests cuyo título contiene «CA-EDT-13» pasan, sin ninguno fallido ni omitido.
+
+### PP-EDT-15 — «Rellenar» no está disponible en borrador y se explica
+
+- **Cubre:** CA-EDT-14
+- **Tipo:** automático (Vitest + Playwright)
+- **Precondiciones:** seed aplicado.
+- **Pasos:**
+  ```bash
+  npx vitest run src/lib/form-editor/fill-link.test.ts -t "CA-EDT-14"
+  npx playwright test e2e/form-editor-listing.spec.ts -g "CA-EDT-14"
+  ```
+- **Resultado esperado:** código de salida 0 en ambos comandos; todos los tests cuyo título contiene «CA-EDT-14» pasan, sin ninguno fallido ni omitido.
+
+### PP-EDT-16 — El listado muestra el recuento real de respuestas, aislado por organización
+
+- **Cubre:** CA-EDT-15
+- **Tipo:** automático (Vitest + Playwright)
+- **Precondiciones:** base de datos migrada; seed aplicado.
+- **Pasos:**
+  ```bash
+  npx vitest run src/server/forms/form.repository.test.ts -t "CA-EDT-15"
+  npx playwright test e2e/form-editor-listing.spec.ts -g "CA-EDT-15"
+  ```
+- **Resultado esperado:** código de salida 0 en ambos comandos; todos los tests cuyo título contiene «CA-EDT-15» pasan, sin ninguno fallido ni omitido.
+
 ## Pruebas globales del módulo
 
 Todavía no aplica: solo hay un issue (#6) en `form-editor`. Se añadirá cuando el arquitecto pida una prueba global en la etapa `merge`.
@@ -186,6 +222,7 @@ Todavía no aplica: solo hay un issue (#6) en `form-editor`. Se añadirá cuando
 - [ ] La vista previa móvil se parece de verdad a un teléfono y usa los colores de `DEFAULT_THEME` (RF-EDT-09) — Cubre: RF-EDT-09.
 - [ ] El botón "Pedir cambios a la IA" está visible pero deshabilitado, con un texto o tooltip que explique que llegará más adelante (RF-EDT-12, placeholder) — Cubre: RF-EDT-12.
 - [ ] Con un formulario de ~100 campos, arrastrar y escribir en el panel de propiedades no se nota con tirones perceptibles (RNF-EDT-02, Should) — Cubre: RNF-EDT-02.
+- [ ] El menú de la fila muestra «Rellenar» desactivada con su explicación de forma clara y el enlace del contador de respuestas se ve como enlace (RF-EDT-13, RF-EDT-14) — Cubre: RF-EDT-13, RF-EDT-14.
 
 ## Limpieza
 
@@ -197,3 +234,4 @@ docker compose down -v --remove-orphans
 
 - 2026-11-17 — Plan de pruebas inicial (#6): PP-EDT-01 a PP-EDT-09, uno por cada CA-EDT-01 a CA-EDT-08 más el aislamiento multi-tenant transversal.
 - 2026-11-17 — Revisión del arquitecto (#6): PP-EDT-10 a PP-EDT-13, uno por cada CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06 y 07, que no tenían ningún caso trazable).
+- 2026-11-26 — #34: PP-EDT-14 a PP-EDT-16 para CA-EDT-13 a CA-EDT-15 (acción «Rellenar» y contador real). Comprobación manual añadida. Revisión del arquitecto: el plan se ejecuta sobre la rama de cada PR.

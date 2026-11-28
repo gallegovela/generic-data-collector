@@ -2,7 +2,7 @@
 
 - **Requisitos:** [README.md](README.md)
 - **Responsable:** analyst-programmer (escribe), architect (revisa)
-- **Issues:** #6
+- **Issues:** #6, #34
 
 ## Resumen
 
@@ -413,7 +413,64 @@ sequenceDiagram
 | 16 | #6 | `src/app/admin/forms/page.tsx`, `src/app/admin/forms/[id]/page.tsx` | 6, 14, 15 |
 | 17 | #6 | `e2e/form-editor-canvas.spec.ts` (CA-EDT-01, 08, 09), `e2e/form-editor-autosave.spec.ts` (CA-EDT-03, 07, 10, 12), `e2e/form-editor-listing.spec.ts` (CA-EDT-04, 05, 06) | 16 |
 
+## Acción «Rellenar» y contador real de respuestas (#34)
+
+Cubre: RF-EDT-13, RF-EDT-14, CA-EDT-13, CA-EDT-14, CA-EDT-15. Sustituye lo dicho arriba sobre `responseCount` «siempre 0» (placeholder de #6; `Submission` ya existe por #7).
+
+### Repositorio (`src/server/forms/form.repository.ts`)
+
+```ts
+export type FormSummary = {
+  id: string;
+  name: string;
+  status: FormStatus;
+  slug: string | null;            // NUEVO: lo necesita la acción «Rellenar»
+  publishedVersionLabel: string;
+  responseCount: number;          // real
+  updatedAt: Date;
+};
+```
+
+`listFormsByOrganization(organizationId)`:
+
+1. `prisma.form.findMany({ where: { organizationId, archivedAt: null }, orderBy: { updatedAt: "desc" } })` (sin cambios).
+2. Si hay formularios, **una sola** consulta de recuento:
+   `prisma.submission.groupBy({ by: ["formId"], where: { organizationId, formId: { in: formIds } }, _count: { _all: true } })`.
+3. Construye un `Map<formId, number>`; `responseCount = map.get(form.id) ?? 0`. Si no hay formularios no se hace la consulta. `slug: form.slug`.
+
+Reglas: `organizationId` siempre en el `where` de ambas consultas; no se leen columnas de `Submission` salvo el recuento; se elimina el `TODO(submissions-dashboard, RF-SUB-05)`.
+
+### Interfaz (`src/components/form-editor/forms-table.tsx`)
+
+- Menú de acciones: nuevo `DropdownMenuItem` «Rellenar», entre «Abrir» y «Duplicar».
+  - Disponible si `form.status === "published" && form.slug !== null`: se renderiza con `asChild` + `<Link href={`/f/${form.slug}`}>Rellenar</Link>` (enlace real, rol `menuitem`).
+  - Si no: `DropdownMenuItem` con `disabled`, `aria-disabled`, sin enlace, y debajo (o `title`) el texto «Publica el formulario para poder rellenarlo». El texto debe ser visible dentro del menú abierto (no solo tooltip), para que se pueda comprobar con Playwright.
+- Celda «Respuestas»: si `form.responseCount > 0`, `<Link href={`/admin/forms/${form.id}/submissions`}>{form.responseCount}</Link>`; si es 0, el número sin enlace. `data-testid="response-count"` en la celda.
+- Lógica de disponibilidad en una función pura exportada desde `src/lib/form-editor/fill-link.ts`:
+
+```ts
+/** href de relleno o motivo por el que no está disponible. */
+export function getFillAction(form: { status: FormStatus; slug: string | null }):
+  | { available: true; href: string }
+  | { available: false; reason: string }; // "Publica el formulario para poder rellenarlo"
+```
+
+### Tests
+
+| Criterio | Tipo | Fichero |
+| --- | --- | --- |
+| CA-EDT-13, CA-EDT-14 (lógica) | Vitest | `src/lib/form-editor/fill-link.test.ts` (títulos con «CA-EDT-13» / «CA-EDT-14») |
+| CA-EDT-15 | Vitest | `src/server/forms/form.repository.test.ts` — dos organizaciones con respuestas, 3 respuestas en un formulario de A, 0 en otro; título con «CA-EDT-15» |
+| CA-EDT-13, CA-EDT-14, CA-EDT-15 | Playwright | `e2e/form-editor-listing.spec.ts` — nuevos tests con títulos «CA-EDT-13», «CA-EDT-14», «CA-EDT-15» |
+
+Dependencia: `form-editor` **lee** `Submission` (de `submissions-dashboard`) solo para el recuento; si ese módulo cambia el modelo, hay que revisar este repositorio.
+
+Datos de Playwright (CA-EDT-13 y CA-EDT-15): se siembran con Prisma desde el test, con un `slug` único por ejecución (el campo es `@unique`, evita colisiones con el seed) y se borran en `afterAll`. En CA-EDT-14 el texto de `reason` se comprueba con `getByText` dentro del menú abierto.
+
+Actualizar los mocks de `src/server/forms/form.service.test.ts` (líneas con `responseCount: 0`) para incluir `slug: null`.
+
 ## Historial de cambios
 
 - 2026-11-17 — Diseño inicial (#6): modelo `Form` propio (sin `FormVersion`/`Submission`), `DraftFormSchema` sin mínimo de campos, editor con `@dnd-kit`, placeholders para tema real y asistente de IA.
 - 2026-11-17 — Revisión del arquitecto (#6): cobertura de tests para CA-EDT-09 a CA-EDT-12 (RF-EDT-03, 05, 06, 07); `mapDraftIssuesToFields` tipado con `z.ZodError` en vez de `z.core.$ZodIssue[]`, para no depender de un tipo interno de `zod`; aclarado que `mobile-preview.tsx` lista todos los campos sin evaluar `visibleIf`, marcando los condicionales con una insignia.
+- 2026-11-26 — Diseño de #34: acción «Rellenar» (`getFillAction`, enlace a `/f/<slug>` solo si publicado y con slug), `FormSummary.slug` y contador real con `submission.groupBy` en una sola consulta. Revisión del arquitecto: dependencia de lectura de `Submission` anotada; datos de Playwright sembrados con slug único y limpiados en `afterAll`.

@@ -13,6 +13,7 @@ export type FormSummary = {
   id: string;
   name: string;
   status: FormStatus;
+  slug: string | null;
   publishedVersionLabel: string;
   responseCount: number;
   updatedAt: Date;
@@ -29,13 +30,23 @@ export async function listFormsByOrganization(organizationId: string): Promise<F
     where: { organizationId, archivedAt: null },
     orderBy: { updatedAt: "desc" },
   });
+  // Una sola consulta agrupada (sin N+1); solo se cuenta, no se leen respuestas (RF-EDT-14).
+  const counts = new Map<string, number>();
+  if (forms.length > 0) {
+    const grouped = await prisma.submission.groupBy({
+      by: ["formId"],
+      where: { organizationId, formId: { in: forms.map((f) => f.id) } },
+      _count: { _all: true },
+    });
+    for (const g of grouped) counts.set(g.formId, g._count._all);
+  }
   return forms.map((form) => ({
     id: form.id,
     name: form.name,
     status: form.status,
+    slug: form.slug,
     publishedVersionLabel: versionLabel(form.status, form.publishedVersion),
-    // TODO(submissions-dashboard, RF-SUB-05): sustituir cuando exista Submission
-    responseCount: 0,
+    responseCount: counts.get(form.id) ?? 0,
     updatedAt: form.updatedAt,
   }));
 }
