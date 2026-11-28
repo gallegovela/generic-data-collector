@@ -29,7 +29,7 @@ test("CA-PUB-01 CA-PUB-02: el admin publica, ve enlace y QR y abre /f/<slug>", a
 
   const slug = (await link.inputValue()).split("/f/")[1];
   await page.goto(`/f/${slug}`);
-  await expect(page.getByTestId("fill-placeholder")).toBeVisible();
+  await expect(page.getByTestId("fill-form")).toBeVisible();
 });
 
 // Cubre: CA-PUB-06
@@ -52,7 +52,7 @@ test("CA-PUB-06: despublicar cierra el enlace y republicar lo reabre", async ({ 
   await page.getByTestId("publish-button").click();
   await expect(page.getByTestId("publish-status")).toHaveText("Publicado v2");
   await page.goto(`/f/${slug}`);
-  await expect(page.getByTestId("fill-placeholder")).toBeVisible();
+  await expect(page.getByTestId("fill-form")).toBeVisible();
 });
 
 // Cubre: CA-PUB-07

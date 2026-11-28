@@ -57,7 +57,11 @@ export class UnsupportedMediaTypeError extends Error {
 }
 
 export class RateLimitError extends Error {
-  constructor(message = "Demasiados intentos. Inténtalo de nuevo en unos minutos.") {
+  /** Segundos hasta que se libera cupo (para `Retry-After`), si se conocen. */
+  constructor(
+    message = "Demasiados intentos. Inténtalo de nuevo en unos minutos.",
+    public readonly retryAfterSeconds?: number,
+  ) {
     super(message);
     this.name = "RateLimitError";
   }

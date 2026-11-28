@@ -87,6 +87,15 @@ describe("stored-file.repository", () => {
     expect(cutoffPast.map((o) => o.id)).not.toContain(recent.record.id);
   });
 
+  // Cubre: CA-COL-07
+  it("CA-COL-07: linkToSubmission no reasigna un archivo ya enlazado a otra respuesta", async () => {
+    const { record } = await createIfAbsent(orgA.id, data());
+    expect(await linkToSubmission(orgA.id, [record.key], "sub-a")).toBe(1);
+    expect(await linkToSubmission(orgA.id, [record.key], "sub-b")).toBe(0);
+    expect(await linkToSubmission(orgA.id, [record.key], "sub-a")).toBe(1);
+    expect((await findByKey(orgA.id, record.key))?.submissionId).toBe("sub-a");
+  });
+
   it("huérfanos: linkToSubmission no toca archivos de otra organización", async () => {
     const { record } = await createIfAbsent(orgA.id, data());
     expect(await linkToSubmission(orgB.id, [record.key], "sub-2")).toBe(0);

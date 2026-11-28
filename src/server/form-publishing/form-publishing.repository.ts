@@ -128,3 +128,22 @@ export function findFormBySlug(slug: string): Promise<Form | null> {
 export function findVersionById(versionId: string): Promise<FormVersion | null> {
   return prisma.formVersion.findUnique({ where: { id: versionId } });
 }
+
+/**
+ * Formularios publicados de una organización (para el listado de recogida).
+ *
+ * Cubre: RF-COL-01
+ */
+export function listPublishedForms(
+  organizationId: string,
+): Promise<Array<{ id: string; name: string; slug: string }>> {
+  return prisma.form
+    .findMany({
+      where: { organizationId, status: "published", archivedAt: null, slug: { not: null } },
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    })
+    .then((rows) =>
+      rows.flatMap((r) => (r.slug === null ? [] : [{ id: r.id, name: r.name, slug: r.slug }])),
+    );
+}
