@@ -28,6 +28,8 @@ flowchart TD
   GDPR[privacy-gdpr] -.-> SUB
   GDPR -.-> STO
   SEED[demo-seed] -.-> SUB
+  SET[admin-settings] -.-> SUB
+  SET -.-> STO
 ```
 
 ## Índice
@@ -48,6 +50,7 @@ flowchart TD
 | 12 | [public-api](public-api/README.md) | `API` | API REST de solo lectura con claves por organización | borrador |
 | 13 | [privacy-gdpr](privacy-gdpr/README.md) | `GDPR` | RGPD transversal: logs, retención, exportación y borrado de una organización | borrador |
 | 14 | [demo-seed](demo-seed/README.md) | `SEED` | Datos de ejemplo y recorrido de la demo con Playwright | borrador |
+| 15 | [admin-settings](admin-settings/README.md) | `SET` | Sección de ajustes para administradores y planes de uso con límites por formulario | diseñado |
 
 El orden es el de construcción recomendado; los módulos transversales (`privacy-gdpr`) aplican desde el principio.
 

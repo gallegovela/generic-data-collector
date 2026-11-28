@@ -19,6 +19,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <a href="/admin/users" className="hover:underline">
             Usuarios
           </a>
+          <Link href="/admin/settings" className="hover:underline">
+            Ajustes
+          </Link>
           <span className="text-muted-foreground">{user.name}</span>
         </nav>
       </header>

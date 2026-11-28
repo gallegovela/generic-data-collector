@@ -36,6 +36,7 @@ Guardar de forma privada y segura fotos, firmas, logos y documentos, con una int
 | RF-STO-09 | Must | Existe una ruta autenticada `GET /api/files?key=<clave>` que, si la clave es de la organización de la sesión, responde con una redirección a una URL firmada de vida corta (#25). |
 | RF-STO-10 | Must | Existe una ruta autenticada `POST /api/files` que sube un archivo, comprueba su tipo real (por su contenido, no por la extensión ni el `Content-Type` declarado) y su tamaño, y registra sus metadatos en la tabla `StoredFile` (#25). La subida anónima de un formulario público la añadirá `field-collector` reutilizando el mismo servicio. |
 | RF-STO-11 | Must | Todo archivo subido queda registrado con organización, tipo, tamaño y fecha, y con una referencia opcional a la respuesta, para localizar huérfanos y borrar por organización (#25). |
+| RF-STO-12 | Must | Además del máximo técnico (RF-STO-04), `uploadFile` rechaza con `PayloadTooLargeError` (413) un archivo mayor que `maxFileBytes` del plan de la organización (ver [`admin-settings`](../admin-settings/README.md), RF-SET-12), sin guardar nada. Un archivo igual al límite se acepta. (#40) |
 
 ## Requisitos no funcionales
 
@@ -58,8 +59,11 @@ Guardar de forma privada y segura fotos, firmas, logos y documentos, con una int
 - **CA-STO-03** — Dada una imagen subida, cuando un usuario de su organización pide la ruta de acceso, entonces recibe una redirección a una URL firmada que caduca en 15 minutos o menos.
 - **CA-STO-04** — Dado un archivo con tipo no admitido o más grande que el máximo, cuando se sube, entonces se rechaza sin guardar nada (ni en el almacenamiento ni en la base de datos).
 - **CA-STO-05** — Dada la misma subida repetida con el mismo identificador, entonces solo existe un archivo.
+- **CA-STO-06** — Dado un plan con `maxFileBytes` de 1 MB, cuando se sube un archivo de 2 MB, entonces se rechaza con 413 y un mensaje claro y no se guarda nada; uno de 500 KB se acepta. Se detalla en CA-SET-04. (#40)
 
 ## Historial de cambios
+
+- 2026-11-27 — Issue #40: nuevo RF-STO-12 y CA-STO-06 (tamaño máximo según el plan de la organización).
 
 - 2026-11-26 — Revisión del arquitecto: alcance S3/Azure en modo S3 y fuera de alcance ampliado (#25).
 - 2026-11-26 — RF-STO-08 a RF-STO-11, RNF-STO-04, CA-STO-03 a CA-STO-05; RF-STO-07 acotado; estado "diseñado" (#25).

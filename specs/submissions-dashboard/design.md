@@ -517,7 +517,13 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
 | 20 | #27 | Servicio `createSubmission` y `versions` en `listSubmissions` (+ tests) | 18, 19 |
 | 21 | #27 | Tabla y barra de filtros con versión; ampliar el e2e del listado | 20 |
 
+## Límite de recepciones por plan (#40)
+
+`createSubmission` llama a `assertUsage(organizationId, form.id, "submission", now)` (módulo `admin-settings`) justo antes de `insertSubmission`, después de la idempotencia y la validación, y llama a `refundUsage` si el insert falla o pierde la carrera de idempotencia. Lanza `PlanLimitError` (nuevo en `src/lib/errors.ts`; HTTP 429 para el consumidor). Detalle en [`admin-settings/design.md`](../admin-settings/design.md#createsubmission-rf-set-11).
+
 ## Historial de cambios
+
+- 2026-11-27 — Límite de recepciones por plan en `createSubmission` (#40).
 
 - 2026-11-18 — Diseño inicial (#7): `Submission` sin clave foránea a `Form`/`FormVersion` (identificador lógico `formId` + copia inmutable del esquema en `formVersionSnapshot`, RF-SUB-11); listado paginado y filtrable, ficha de detalle solo lectura y panel de inicio, todos como Server Components sin ninguna mutación; mapa con `leaflet`/`react-leaflet` (dependencia nueva, pendiente de aprobación); marcador de posición para fotos/firma mientras no exista `file-storage`; RNF-SUB-02 fuera del plan de pruebas automático (riesgo anotado).
 - 2026-11-26 — Issue #28 (ver `specs/outputs/design.md`): `Submission.formVersionNumber Int?` (nullable); `listSubmissionsByForm` pasa a usar `buildSubmissionWhere` y `listSubmissions` a usar `toListFilters`, sin cambiar su comportamiento; nuevas `countSubmissionsOfForm` y `listSubmissionsForExport`; el listado muestra los enlaces de exportación.

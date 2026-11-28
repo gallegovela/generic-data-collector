@@ -7,6 +7,7 @@ import {
   UnsupportedMediaTypeError,
   ValidationError,
 } from "@/lib/errors";
+import { ensureGenericPlan } from "@/server/admin-settings/test-helpers";
 import { createOrganization } from "@/server/auth/organization.repository";
 import { prisma } from "@/server/db/client";
 import { InMemoryStorageAdapter } from "./in-memory-storage-adapter";
@@ -184,6 +185,75 @@ describe("storage.service", () => {
       event: "file.uploaded",
       key: file.key,
       sizeBytes: JPG.byteLength,
+    });
+  });
+});
+
+// Cubre: CA-SET-04, CA-STO-06, RF-STO-12
+describe("límite de plan (uploadFile)", () => {
+  const MB = 1048576;
+  const jpgOfSize = (size: number) => {
+    const bytes = new Uint8Array(size);
+    bytes.set(JPG);
+    return bytes;
+  };
+  let plan: { id: string };
+  let org: { id: string };
+  let adapter: InMemoryStorageAdapter;
+
+  const setLimit = (maxFileBytes: number | null) =>
+    prisma.plan.update({ where: { id: plan.id }, data: { maxFileBytes } });
+
+  beforeAll(async () => {
+    await ensureGenericPlan();
+    plan = await prisma.plan.create({ data: { name: `Plan storage test ${randomUUID()}`, maxFileBytes: MB } });
+    org = await createOrganization({ name: "Org (límite de plan storage test)", planId: plan.id });
+  });
+
+  beforeEach(async () => {
+    adapter = new InMemoryStorageAdapter();
+    setStorageAdapterForTests(adapter);
+    await setLimit(MB);
+  });
+
+  afterEach(async () => {
+    await prisma.storedFile.deleteMany({ where: { organizationId: org.id } });
+  });
+
+  afterAll(async () => {
+    setStorageAdapterForTests(null);
+    await prisma.organization.deleteMany({ where: { id: org.id } });
+    await prisma.plan.deleteMany({ where: { id: plan.id } });
+  });
+
+  describe("límite de tamaño", () => {
+    it("un archivo de 2 MB se rechaza con el mensaje del plan y no se guarda", async () => {
+      const err = await uploadFile(org.id, { kind: "photo", uploadId: randomUUID(), bytes: jpgOfSize(2 * MB) }).catch(
+        (e: unknown) => e,
+      );
+      expect(err).toBeInstanceOf(PayloadTooLargeError);
+      expect((err as Error).message).toContain("tamaño máximo de tu plan");
+      expect((err as Error).message).toContain("1 MB");
+      expect(adapter.objects.size).toBe(0);
+      expect(await prisma.storedFile.count({ where: { organizationId: org.id } })).toBe(0);
+    });
+
+    it("un archivo de 500 KB se acepta", async () => {
+      const r = await uploadFile(org.id, { kind: "photo", uploadId: randomUUID(), bytes: jpgOfSize(500 * 1024) });
+      expect(r.created).toBe(true);
+    });
+
+    it("un archivo de exactamente 1 MB se acepta", async () => {
+      const r = await uploadFile(org.id, { kind: "photo", uploadId: randomUUID(), bytes: jpgOfSize(MB) });
+      expect(r.created).toBe(true);
+    });
+  });
+
+  describe("sin límite", () => {
+    it("con maxFileBytes nulo un archivo de 2 MB no se rechaza por plan", async () => {
+      await setLimit(null);
+      const r = await uploadFile(org.id, { kind: "photo", uploadId: randomUUID(), bytes: jpgOfSize(2 * MB) });
+      expect(r.created).toBe(true);
     });
   });
 });
