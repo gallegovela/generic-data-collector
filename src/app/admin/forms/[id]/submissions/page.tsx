@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ExportButtons } from "@/components/outputs/export-buttons";
 import { SubmissionFiltersBar } from "@/components/submissions-dashboard/submission-filters-bar";
 import { SubmissionsTable } from "@/components/submissions-dashboard/submissions-table";
@@ -38,13 +39,22 @@ export default async function SubmissionsPage({
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Respuestas</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">Respuestas</h1>
+        <Link
+          href={`/admin/forms/${id}/destinations`}
+          className="inline-flex h-8 items-center rounded-lg border border-input px-2.5 text-sm hover:bg-muted"
+        >
+          Destinos
+        </Link>
+      </div>
       <SubmissionFiltersBar
         formId={id}
         values={filters}
         filterableFields={result.filterableFields}
         versions={result.versions}
       />
+      {result.total > 0 ? <ExportButtons formId={id} query={queryWithoutPage} /> : null}
       <SubmissionsTable formId={id} result={result} query={queryWithoutPage} />
     </div>
   );

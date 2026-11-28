@@ -15,6 +15,8 @@ export interface StorageAdapter {
   getSignedUrl(key: string, expiresInSeconds: number): Promise<string>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
+  /** Contenido del objeto (solo servidor, nunca por URL pública). Lanza si no existe. */
+  get(key: string): Promise<Uint8Array>;
 }
 
 let adapter: StorageAdapter | null = null;

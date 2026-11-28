@@ -1,7 +1,13 @@
 import nodemailer from "nodemailer";
 import { getEnv } from "@/lib/env";
 
-export type SendEmailInput = { to: string; subject: string; html: string; text: string };
+export type SendEmailInput = {
+  to: string | string[];
+  subject: string;
+  html: string;
+  text: string;
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
+};
 
 let cachedTransporter: ReturnType<typeof nodemailer.createTransport> | undefined;
 
@@ -33,10 +39,11 @@ export async function sendEmail(input: SendEmailInput): Promise<void> {
   try {
     await getTransporter().sendMail({
       from: SMTP_FROM,
-      to: input.to,
+      to: Array.isArray(input.to) ? input.to.join(", ") : input.to,
       subject: input.subject,
       html: input.html,
       text: input.text,
+      attachments: input.attachments,
     });
     console.log("email enviado");
   } catch (error) {

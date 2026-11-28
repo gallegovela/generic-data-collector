@@ -58,6 +58,11 @@ export function createS3StorageAdapter(config: S3StorageConfig): StorageAdapter 
     async delete(key) {
       await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }));
     },
+    async get(key) {
+      const result = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }));
+      if (!result.Body) throw new Error("Objeto vacío.");
+      return result.Body.transformToByteArray();
+    },
     async exists(key) {
       try {
         await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }));

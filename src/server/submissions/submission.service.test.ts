@@ -1,4 +1,12 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// RF-OUT-13: espía que delega en la implementación real salvo que un test la cambie.
+const scheduleDeliveries = vi.hoisted(() => vi.fn());
+vi.mock("@/server/outputs/delivery.service", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/server/outputs/delivery.service")>();
+  scheduleDeliveries.mockImplementation(actual.scheduleDeliveries);
+  return { ...actual, scheduleDeliveries };
+});
 import { ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import type { FormVersion } from "@/lib/form-schema";
 import type { CreateSubmissionInput } from "@/lib/submissions-dashboard/create-submission.schema";
@@ -178,6 +186,29 @@ describe("createSubmission", () => {
       const [a, b] = await Promise.all([createSubmission(i), createSubmission(i)]);
       expect(a.submission.id).toBe(b.submission.id);
       expect([a.created, b.created].filter(Boolean)).toHaveLength(1);
+      expect(await prisma.submission.count({ where: { organizationId: org.id, clientId: i.clientId } })).toBe(1);
+    });
+  });
+
+  describe("RF-OUT-13", () => {
+    // Cubre: RF-OUT-13
+    it("RF-OUT-13: solo dispara los envíos cuando se inserta de verdad (created:true)", async () => {
+      scheduleDeliveries.mockClear();
+      const i = input();
+      const first = await createSubmission(i);
+      expect(first.created).toBe(true);
+      expect(scheduleDeliveries).toHaveBeenCalledTimes(1);
+      expect(scheduleDeliveries.mock.calls[0][0]).toBe(org.id);
+      const second = await createSubmission(i);
+      expect(second.created).toBe(false);
+      expect(scheduleDeliveries).toHaveBeenCalledTimes(1);
+    });
+
+    it("RF-OUT-13: si scheduleDeliveries rechaza, la respuesta se guarda igualmente", async () => {
+      scheduleDeliveries.mockRejectedValueOnce(new Error("boom"));
+      const i = input();
+      const result = await createSubmission(i);
+      expect(result.created).toBe(true);
       expect(await prisma.submission.count({ where: { organizationId: org.id, clientId: i.clientId } })).toBe(1);
     });
   });

@@ -3,6 +3,7 @@ import { buildExportTable, type ExportSourceRow } from "@/lib/outputs/export-tab
 import { serializeCsv } from "@/lib/outputs/csv";
 import { EXPORT_MAX_ROWS, type SubmissionExportQuery } from "@/lib/outputs/export-query.schema";
 import { buildFileExportLink } from "@/lib/outputs/file-link";
+import { slugify } from "@/lib/outputs/filename";
 import {
   countSubmissionsOfForm,
   findFilterableFields,
@@ -20,16 +21,6 @@ export type SubmissionExport = {
 
 const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const CSV_TYPE = "text/csv; charset=utf-8";
-
-function slug(title: string): string {
-  const s = title
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return s || "respuestas";
-}
 
 function yyyymmdd(date: Date): string {
   return date.toISOString().slice(0, 10).replace(/-/g, "");
@@ -78,7 +69,7 @@ export async function exportSubmissions(
   const title = rows.length > 0 ? rows[0].formTitle : "respuestas";
 
   return {
-    filename: `${slug(title)}-respuestas-${yyyymmdd(new Date())}.${format}`,
+    filename: `${slugify(title)}-respuestas-${yyyymmdd(new Date())}.${format}`,
     contentType: format === "xlsx" ? XLSX_TYPE : CSV_TYPE,
     body,
     rowCount: rows.length,

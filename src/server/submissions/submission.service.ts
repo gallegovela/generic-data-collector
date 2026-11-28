@@ -17,6 +17,7 @@ import {
   SUBMISSIONS_PAGE_SIZE,
   type SubmissionFiltersInput,
 } from "@/lib/submissions-dashboard/submission-filters.schema";
+import { scheduleDeliveries } from "@/server/outputs/delivery.service";
 import {
   findFilterableFields,
   findSubmissionByClientId,
@@ -129,6 +130,12 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Cr
       submittedByName: actor.kind === "user" ? actor.userName : null,
       capturedAt,
     });
+    // RF-OUT-13: encola los envíos; nunca lanza ni retrasa ni pierde la respuesta.
+    try {
+      await scheduleDeliveries(organizationId, submission);
+    } catch {
+      // Sin contenido: la respuesta ya está guardada.
+    }
     return { submission, created: true };
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;

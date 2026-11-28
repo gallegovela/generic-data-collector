@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { PdfDownloadLink } from "@/components/outputs/pdf-download-link";
 import { SubmissionDetail } from "@/components/submissions-dashboard/submission-detail";
 import { NotFoundError } from "@/lib/errors";
 import { requireAdminPage } from "@/server/auth/session";
@@ -28,9 +29,12 @@ export default async function SubmissionDetailPage({
 
   return (
     <div className="space-y-4">
-      <Link href={`/admin/forms/${id}/submissions`} className="text-sm underline">
-        ← Volver al listado
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link href={`/admin/forms/${id}/submissions`} className="text-sm underline">
+          ← Volver al listado
+        </Link>
+        <PdfDownloadLink formId={id} submissionId={submissionId} />
+      </div>
       <SubmissionDetail submission={submission} />
     </div>
   );

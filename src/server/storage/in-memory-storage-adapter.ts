@@ -22,4 +22,10 @@ export class InMemoryStorageAdapter implements StorageAdapter {
   async exists(key: string): Promise<boolean> {
     return this.objects.has(key);
   }
+
+  async get(key: string): Promise<Uint8Array> {
+    const object = this.objects.get(key);
+    if (!object) throw new Error("Objeto no encontrado.");
+    return object.body;
+  }
 }

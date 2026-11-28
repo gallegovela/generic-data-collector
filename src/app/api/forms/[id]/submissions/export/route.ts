@@ -5,6 +5,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "@/lib/errors";
+import { resolveBaseUrl } from "@/lib/outputs/base-url";
 import { submissionExportQuerySchema } from "@/lib/outputs/export-query.schema";
 import { requireSession } from "@/server/auth/session";
 import { exportSubmissions } from "@/server/outputs/export.service";
@@ -12,11 +13,6 @@ import { exportSubmissions } from "@/server/outputs/export.service";
 export const dynamic = "force-dynamic";
 
 const KEYS = ["format", "dateFrom", "dateTo", "submittedBy", "fieldId", "fieldValue", "q"] as const;
-
-function resolveBaseUrl(request: NextRequest): string {
-  const configured = process.env.AUTH_URL?.trim();
-  return configured ? configured.replace(/\/+$/, "") : request.nextUrl.origin;
-}
 
 function errorResponse(message: string, status: number): Response {
   return NextResponse.json({ error: message }, { status });

@@ -45,6 +45,10 @@ están accesibles (200 `ok` / 503 `error`).
 Durante el desarrollo de un módulo con modelos nuevos, usa
 `npx prisma migrate dev --name <nombre>` para crear la migración.
 
+## Destinos de las respuestas (email con PDF y webhook)
+
+Cada formulario puede enviar cada respuesta nueva por email (con el PDF adjunto) y a un webhook firmado (`/admin/forms/<id>/destinations`). Los envíos se encolan en PostgreSQL y un procesador dentro de la aplicación (`DELIVERY_POLLER_ENABLED`, `DELIVERY_POLL_INTERVAL_SECONDS`) los reintenta hasta 5 veces. **Limitación del piloto:** sin proceso vivo no hay reintentos; los pendientes se reanudan al arrancar. Ver `specs/outputs/`.
+
 ## Despliegue
 
 El despliegue de la demo pública se hace siempre con `docker compose` (plugin

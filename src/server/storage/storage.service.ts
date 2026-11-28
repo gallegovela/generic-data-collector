@@ -126,6 +126,23 @@ export async function getSignedFileUrl(
   return { url, expiresInSeconds };
 }
 
+/**
+ * Lee el contenido de un archivo en el servidor (p. ej. para el PDF). No
+ * genera URL. NotFoundError si la clave no está registrada en la
+ * organización (mismo error si es de otra).
+ *
+ * Cubre: RF-OUT-03
+ */
+export async function readFileBytes(
+  organizationId: string,
+  key: string,
+): Promise<{ bytes: Uint8Array; contentType: string; sizeBytes: number }> {
+  const record = await findByKey(organizationId, key);
+  if (!record) throw new NotFoundError("No se ha encontrado el archivo.");
+  const bytes = await getStorageAdapter().get(key);
+  return { bytes, contentType: record.contentType, sizeBytes: record.sizeBytes };
+}
+
 /** Para field-collector: enlaza claves a una respuesta. */
 export function attachFilesToSubmission(
   organizationId: string,
